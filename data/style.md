@@ -74,3 +74,54 @@ spacing = 5
 # vspacer
 sizey = 1parent
 relaxy = 1
+
+# hspacer
+sizex = 1parent
+relaxx = 1
+
+# button_row
+sizex = 1parent
+layout = X
+spacing = 5
+
+# custom_text_box
+borderSize = 2
+border = elevatedBorder
+animation = 0.5
+
+# custom_text_box.invalid
+borderSize = 2
+border = #ff0000ff
+animation = 0.5
+
+# text_box_line
+sizex = 1parent
+sizey = 30px
+
+# full_panel
+sizex = 1parent
+sizey = 1parent
+relaxx = 1
+relaxy = 1
+
+# xlayout
+layout = X
+
+# sidebar
+sizex = 200px
+sizey = 1parent
+background = bg0
+border = border
+borderSize = 2
+
+# sidebar_inner
+layout = Y
+marginx = 10
+marginy = 10
+spacing = 5
+
+# task_panel_inner
+layout = Y
+background = bg0
+marginx = 40
+spacing = 2

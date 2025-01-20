@@ -79,22 +79,17 @@ editor_task_context_menu :: proc(editor: ^Editor) {
 }
 
 editor_ui_all :: proc(editor: ^Editor, scratch: oc.arena_scope) {
-	style: Style
-        style_sizex_full(&style, 1, 1)
-        style_sizey_full(&style, 1, 1)
-        style_inner: Style
-        style_layout(&style_inner, .X, {}, 0)
+	ui := &editor.ui_context
+        stylesheet := &editor.stylesheet
+        
+        style := stylesheet_fetch(stylesheet, "full_panel")
+        style_inner := stylesheet_fetch(stylesheet, "xlayout")
         custom_panel_begin("main", style, style_inner, PANEL_FLAGS)
         defer custom_panel_end()
         
 	{
-		style = {}
-		style_sizex(&style, 200)
-            style_sizey_full(&style)
-            style_bg_color(&style, editor.ui_context.theme.bg0)
-            style_border(&style, 2, editor.ui_context.theme.border)
-            style_inner = {}
-		style_layout(&style_inner, .Y, 10, 5)
+		style = stylesheet_fetch(stylesheet, "sidebar")
+            style_inner = stylesheet_fetch(stylesheet, "sidebar_inner")
             custom_panel_begin("sidebar", style, style_inner, PANEL_FLAGS)
             defer custom_panel_end()
             
@@ -107,10 +102,8 @@ editor_ui_all :: proc(editor: ^Editor, scratch: oc.arena_scope) {
             if editor.show_task_context != nil {
 			task := editor.show_task_context
                 
-                style = {}
-			style_sizey_full(&style, 1, 1)
-                style_next(style)
-                oc.ui_box_make_str8("spacer", style.box)
+                style = stylesheet_fetch(stylesheet, "vspacer")
+                style_box_make(ui, "spacer", style, {}, {})
                 
                 style = {}
 			style_sizex_full(&style)
@@ -122,21 +115,15 @@ editor_ui_all :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 		}
 	}
     
-	style = {}
-	style_sizex_full(&style, 1, 1)
-        style_sizey_full(&style, 1, 1)
+	style = stylesheet_fetch(stylesheet, "full_panel")
         style_inner = {}
 	custom_panel_begin("task_main", style, style_inner, PANEL_FLAGS)
         defer custom_panel_end()
         
         editor_task_text_display(editor)
         
-        style = {}
-	style_sizex_full(&style, 1, 1)
-        style_sizey_full(&style, 1, 1)
-        style_inner = {}
-	style_layout(&style_inner, .Y, {40, 0}, TASK_GAP)
-        style_bg_color(&style_inner, editor.ui_context.theme.bg0)
+        style = stylesheet_fetch(stylesheet, "full_panel")
+        style_inner = stylesheet_fetch(stylesheet, "task_panel_inner")
         panel, contents := custom_panel_begin("tasks", style, style_inner, PANEL_VERTICAL_FLAGS + { .CLICKABLE })
         defer custom_panel_end()
         
@@ -154,13 +141,11 @@ editor_ui_all :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 }
 
 builder_text_box :: proc(editor: ^Editor, box: ^Task_Box, scratch: oc.arena_scope, name: string, box_name: cstring) -> bool {
-	theme := editor.ui_context.theme
-        box_content := strings.to_string(box.builder)
-        invalid := oc.color_rgba(1, 0, 0, 1)
+	box_content := strings.to_string(box.builder)
         
-        style: Style
-        style_border(&style, 2, len(box_content) == 0 ? invalid : theme.elevatedBorder)
-        style_animate(&style, 0.5, style.mask)
+        ui := &editor.ui_context
+        stylesheet := &editor.stylesheet
+        style := stylesheet_fetch(stylesheet, len(box_content) == 0 ? "custom_text_box.invalid" : "custom_text_box")
         style_after(style)
         
         box.key_frame = oc.ui_key_make_str8(string(box_name))
@@ -169,9 +154,7 @@ builder_text_box :: proc(editor: ^Editor, box: ^Task_Box, scratch: oc.arena_scop
         oc.str8_list_push(scratch.arena, &path, "text")
         box.key_text = oc.ui_key_make_path(path)
         
-        style = {}
-	style_sizex_full(&style, 1)
-        style_sizey(&style, 30)
+        style = stylesheet_fetch(stylesheet, "text_box_line")
         style_next(style)
         
         res := oc.ui_text_box(box_name, scratch.arena, box_content)
@@ -185,7 +168,8 @@ builder_text_box :: proc(editor: ^Editor, box: ^Task_Box, scratch: oc.arena_scop
 		textbox := oc.ui_box_lookup_key(box.key_frame)
             style: Style
             active_or_filled := textbox.active || len(box_content) > 0
-            style_color(&style, len(box_content) == 0 && !textbox.active ? invalid : theme.text0)
+            invalid := oc.color_rgba(1, 0, 0, 1)
+            style_color(&style, len(box_content) == 0 && !textbox.active ? invalid : ui.theme.text0)
             xgoal := active_or_filled ? textbox.rect.x : textbox.rect.x + 14
             ygoal := active_or_filled ? textbox.rect.y - 20 : textbox.rect.y + 6
             style_float(&style, xgoal, ygoal)
@@ -397,7 +381,7 @@ editor_task_menu :: proc(editor: ^Editor, scratch: oc.arena_scope) {
         
         theme := editor.ui_context.theme
         
-	{
+        if false {
         style = stylesheet_fetch(stylesheet, "theme_picker")
             style_next(style)
             oc.ui_container("theme", style.box)
@@ -435,9 +419,7 @@ editor_task_menu :: proc(editor: ^Editor, scratch: oc.arena_scope) {
             
             // horizontal buttons
 		{
-			style = {}
-			style_sizex_full(&style)
-                style_layout(&style, .X, {}, 5)
+			style = stylesheet_fetch(stylesheet, "button_row")
                 style_next(style)
                 oc.ui_container("button_row", {})
                 
@@ -446,10 +428,8 @@ editor_task_menu :: proc(editor: ^Editor, scratch: oc.arena_scope) {
                     editor_toggle_menu(editor, nil)
 			}
             
-			style = {}
-			style_sizex_full(&style, 1, 1)
-                style_next(style)
-                oc.ui_box_make_str8("spacer2", style.box)
+			style = stylesheet_fetch(stylesheet, "hspacer")
+                style_box_make(ui, "spacer2", style, {}, {})
                 
                 if oc.ui_button("Cancel").pressed {
 				editor_toggle_menu(editor, nil)

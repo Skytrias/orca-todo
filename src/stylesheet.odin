@@ -13,7 +13,7 @@ Stylesheet :: struct {
     palette_colors: map[string]^oc.color, // palette color name to color
 }
 
-stylesheet_read_size_kind :: proc(style: ^Style, index: int, text: string) {
+stylesheet_read_size_kind :: proc(style: ^Style, class_name: string, index: int, text: string) {
     kind: oc.ui_size_kind
         size: f32
         find_index: int
@@ -37,10 +37,12 @@ stylesheet_read_size_kind :: proc(style: ^Style, index: int, text: string) {
     
     // read parent size
     find_index = strings.index(text, "parent")
+        set_parent := false
         if find_index != -1 {
         left := text[:find_index]
             size = f32(strconv.atof(left))
             kind = .PARENT
+            set_parent = true
     }
     
     if size != 0 {
@@ -52,6 +54,10 @@ stylesheet_read_size_kind :: proc(style: ^Style, index: int, text: string) {
         style.mask += { .SIZE_WIDTH }
     } else {
         style.mask += { .SIZE_HEIGHT }
+    }
+    
+    if set_parent {
+        log.info("FINAL STYLE", class_name, style)
     }
 }
 
@@ -67,6 +73,7 @@ stylesheet_read_align :: proc(style: ^Style, index: int, text: string) {
 stylesheet_read_relax :: proc(style: ^Style, index: int, text: string) {
     if relax, ok := strconv.parse_f32(text); ok {
         style.size[index].relax = relax
+            log.info("RELAX", style)
     }
 }
 
@@ -123,8 +130,13 @@ stylesheet_init :: proc(stylesheet: ^Stylesheet, src: string, theme: ^oc.ui_them
                     style_bg_color(&class_style, stylesheet_read_color(stylesheet, tail))
                     
                     case "borderColor", "border": 
-                    class_style.bgColor = stylesheet_read_color(stylesheet, tail)
+                    class_style.borderColor = stylesheet_read_color(stylesheet, tail)
                     class_style.mask += { .BORDER_COLOR }
+                
+                case "borderSize":
+                    if size, ok := strconv.parse_f32(tail); ok {
+                    style_border(&class_style, size)
+                }
                 
                 // TODO fonts by name?
                 // case "font": class_style._color = {}
@@ -144,15 +156,16 @@ stylesheet_init :: proc(stylesheet: ^Stylesheet, src: string, theme: ^oc.ui_them
                     stylesheet_read_layout_axis(&class_style, tail)
                     
                     case "sizex":
-                    stylesheet_read_size_kind(&class_style, 0, tail)
+                    stylesheet_read_size_kind(&class_style, class_name, 0, tail)
                     
                     case "sizey":
-                    stylesheet_read_size_kind(&class_style, 1, tail)
+                    stylesheet_read_size_kind(&class_style, class_name, 1, tail)
                     
                     case "relaxx":
                     stylesheet_read_relax(&class_style, 0, tail)
                     
                     case "relaxy":
+                    log.info("READ Y", tail)
                     stylesheet_read_relax(&class_style, 1, tail)
                     
                     case "alignx":

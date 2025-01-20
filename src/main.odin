@@ -25,19 +25,21 @@ import "core:log"
 // bool based button prettier
 // random pick a task
 // theme window
+// refuce to close if unsaved changes
 
 // TODO stylsheet
 // should style colors reload based on theme changes?
 // add inheritance
 // size kind based on window would be good for floatys
 // how to pick fonts?
+// EM or REM sizes?
 
 ed: Editor
 
 main :: proc() {
 	editor_init(&ed)
         editor_load(&ed)
-        editor_example(&ed)
+        //editor_example(&ed)
 }
 
 @(fini)

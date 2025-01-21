@@ -38,8 +38,8 @@ animation = 0.25
 sizey = 1tx
 marginy = 6
 sizex = 1parent
-alignx = center
-aligny = center
+alignx = start
+aligny = start
 
 # text_display_container
 sizex = 1parent

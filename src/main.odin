@@ -38,21 +38,21 @@ main :: proc() {
   editor_init(&ed)
   editor_load(&ed)
   editor_example(&ed)
-}
+  }
 
-@(fini)
-destroy_all :: proc() {
+  @(fini)
+  destroy_all :: proc() {
   editor := &ed
   editor_destroy(editor)
-}
+  }
 
-@(export)
-oc_on_resize :: proc "c" (width, height: u32) {
+  @(export)
+  oc_on_resize :: proc "c" (width, height: u32) {
   ed.window_size = {f32(width), f32(height)}
-}
+  }
 
-@(export)
-oc_on_frame_refresh :: proc "c" () {
+  @(export)
+  oc_on_frame_refresh :: proc "c" () {
   editor := &ed
   context = runtime.default_context()
   context.logger = editor.logger
@@ -70,14 +70,14 @@ oc_on_frame_refresh :: proc "c" () {
 
   oc.canvas_render(editor.renderer, editor.canvas, editor.surface)
   oc.canvas_present(editor.renderer, editor.surface)
-}
+  }
 
-oc_deselect_textbox :: proc(frame: ^oc.ui_box, text: ^oc.ui_box) {
+  oc_deselect_textbox :: proc(frame: ^oc.ui_box, text: ^oc.ui_box) {
   oc.ui_box_deactivate(frame)
   oc.ui_box_deactivate(text)
-}
+  }
 
-oc_select_textbox :: proc(ui: ^oc.ui_context, frame: ^oc.ui_box, textBox: ^oc.ui_box) {
+  oc_select_textbox :: proc(ui: ^oc.ui_context, frame: ^oc.ui_box, textBox: ^oc.ui_box) {
   if !oc.ui_box_active(frame)
   {
   oc.ui_box_activate(frame)
@@ -91,9 +91,9 @@ oc_select_textbox :: proc(ui: ^oc.ui_context, frame: ^oc.ui_box, textBox: ^oc.ui
   }
 
   ui.editCursorBlinkStart = ui.frameTime
-}
+  }
 
-oc_open_cmp :: proc(path: string, rights: oc.file_access, flags: oc.file_open_flags) -> (cmp: oc.io_cmp) {
+  oc_open_cmp :: proc(path: string, rights: oc.file_access, flags: oc.file_open_flags) -> (cmp: oc.io_cmp) {
   req := oc.io_req {
   op = .OPEN_AT,
   open = {
@@ -105,10 +105,10 @@ oc_open_cmp :: proc(path: string, rights: oc.file_access, flags: oc.file_open_fl
   }
 
   return oc.io_wait_single_req(&req)
-}
+  }
 
-@(export)
-oc_on_key_down :: proc "c" (scancode: oc.scan_code, key: oc.key_code) {
+  @(export)
+  oc_on_key_down :: proc "c" (scancode: oc.scan_code, key: oc.key_code) {
   context = runtime.default_context()
   context.logger = ed.logger
   editor := &ed
@@ -124,15 +124,15 @@ oc_on_key_down :: proc "c" (scancode: oc.scan_code, key: oc.key_code) {
   return
   }
   }
-}
+  }
 
-@(export)
-oc_on_mouse_move :: proc "c" (x, y, dx, dy: f32) {
+  @(export)
+  oc_on_mouse_move :: proc "c" (x, y, dx, dy: f32) {
   ed.mouse_position = { x, y }
-}
+  }
 
-@(export)
-oc_on_raw_event :: proc "c" (event: ^oc.event) {
+  @(export)
+  oc_on_raw_event :: proc "c" (event: ^oc.event) {
   scratch := oc.scratch_begin()
   defer oc.scratch_end(scratch)
 

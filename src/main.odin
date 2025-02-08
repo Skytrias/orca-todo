@@ -1,157 +1,179 @@
 package src
 
 import "base:runtime"
-import oc "core:sys/orca"
 import "core:log"
+import "core:strings"
+import oc "core:sys/orca"
+import "qwe"
 
-// Orca questions
-// dont know how to properly color a button different
-// miss tab jumping
-// is there a way to overwrite text box events? make enter not leave active state
-// not really clear where name collisions are in ui boxes
-// ui debugging tooling would be nice
-// Mouse cursor change?
-// Dear IMGui style hashing like TestButton##1 and TestButton##2
-
-// NOTE
-// tags are different to keys
-
-// TODO
-// sort tasks in mem based on state if you want
-// drag tasks could be fun but not useful
-// blur could be cool
-// OpenGLES Support
-// remember save location
-// theme window
-// refuse to close if unsaved changes
-
-// TODO stylsheet
-// should style colors reload based on theme changes?
-// add inheritance
-// size kind based on window would be good for floatys
-// how to pick fonts?
-// EM or REM sizes?
+// TODO add number on the side of the filter to show how many things there are
+// statusbar
 
 ed: Editor
 
 main :: proc() {
-  editor_init(&ed)
-  editor_load(&ed)
-  editor_example(&ed)
-  }
+	editor_init(&ed)
+	editor_load(&ed)
+	editor_example(&ed)
+}
 
-  @(fini)
-  destroy_all :: proc() {
-  editor := &ed
-  editor_destroy(editor)
-  }
+@(fini)
+destroy_all :: proc() {
+	editor := &ed
+	editor_destroy(editor)
+}
 
-  @(export)
-  oc_on_resize :: proc "c" (width, height: u32) {
-  ed.window_size = {f32(width), f32(height)}
-  }
+@(export)
+oc_on_resize :: proc "c" (width, height: u32) {
+	ed.window_size = {f32(width), f32(height)}
+	context = runtime.default_context()
+	qwe.input_window_size(ed.ui, int(ed.window_size.x), int(ed.window_size.y))
+}
 
-  @(export)
-  oc_on_frame_refresh :: proc "c" () {
-  editor := &ed
-  context = runtime.default_context()
-  context.logger = editor.logger
+@(export)
+oc_on_frame_refresh :: proc "c" () {
+	editor := &ed
+	context = runtime.default_context()
+	context.logger = editor.logger
 
-  scratch := oc.scratch_begin()
-  defer oc.scratch_end(scratch)
+	scratch := oc.scratch_begin()
+	defer oc.scratch_end(scratch)
 
-  oc.canvas_context_select(editor.canvas)
-  oc.set_color_rgba(1, 1, 1, 1)
-  oc.clear()
+	oc.canvas_context_select(editor.canvas)
+	oc.set_color_rgba(1, 1, 1, 1)
+	oc.clear()
 
-  editor_update(editor)
-  editor_render(editor, scratch)
-  oc.ui_draw()
+	editor_update_start(editor)
+	editor_render(editor, scratch)
+	editor_update_end(editor)
 
-  oc.canvas_render(editor.renderer, editor.canvas, editor.surface)
-  oc.canvas_present(editor.renderer, editor.surface)
-  }
+	oc.canvas_render(editor.renderer, editor.canvas, editor.surface)
+	oc.canvas_present(editor.renderer, editor.surface)
+}
 
-  oc_deselect_textbox :: proc(frame: ^oc.ui_box, text: ^oc.ui_box) {
-  oc.ui_box_deactivate(frame)
-  oc.ui_box_deactivate(text)
-  }
+oc_open_cmp :: proc(
+	path: string,
+	rights: oc.file_access,
+	flags: oc.file_open_flags,
+) -> (
+	cmp: oc.io_cmp,
+) {
+	req := oc.io_req {
+		op     = .OPEN_AT,
+		open   = {rights, flags},
+		buffer = raw_data(path),
+		size   = u64(len(path)),
+	}
 
-  oc_select_textbox :: proc(ui: ^oc.ui_context, frame: ^oc.ui_box, textBox: ^oc.ui_box) {
-  if !oc.ui_box_active(frame)
-  {
-  oc.ui_box_activate(frame)
-  oc.ui_box_activate(textBox)
+	return oc.io_wait_single_req(&req)
+}
 
-  //NOTE: focus
-  ui.focus = frame
-  ui.editFirstDisplayedChar = 0
-  ui.editCursor = 0
-  ui.editMark = 0
-  }
+@(export)
+oc_on_mouse_move :: proc "c" (x, y, dx, dy: f32) {
+	ed.mouse_position = {x, y}
+}
 
-  ui.editCursorBlinkStart = ui.frameTime
-  }
+@(export)
+oc_on_raw_event :: proc "c" (event: ^oc.event) {
+	scratch := oc.scratch_begin()
+	defer oc.scratch_end(scratch)
 
-  oc_open_cmp :: proc(path: string, rights: oc.file_access, flags: oc.file_open_flags) -> (cmp: oc.io_cmp) {
-  req := oc.io_req {
-  op = .OPEN_AT,
-  open = {
-  rights,
-  flags,
-  },
-  buffer = raw_data(path),
-  size = u64(len(path))
-  }
+	context = runtime.default_context()
+	editor := &ed
+	context.logger = editor.logger
 
-  return oc.io_wait_single_req(&req)
-  }
+	// oc.ui_process_event(event)
+	oc.input_process_event(scratch.arena, &editor.input, event)
+	defer oc.input_next_frame(&editor.input)
 
-  @(export)
-  oc_on_key_down :: proc "c" (scancode: oc.scan_code, key: oc.key_code) {
-  context = runtime.default_context()
-  context.logger = ed.logger
-  editor := &ed
-  mods := editor.ui_context.input.keyboard.mods
+	if oc.clipboard_pasted(&editor.input) {
+		text := oc.clipboard_pasted_text(&editor.input)
 
-  #partial switch key {
+		if text != "" {
+			write := editor_write_cycle_builder(editor)
+			strings.write_string(write, text)
+		}
+	}
 
-  }
+	#partial switch event.type {
+	case .KEYBOARD_KEY:
+		// log.info("EV", event.key.keyCode, event.key.mods)
+		pressed := event.key.action == .PRESS
+		mods := event.key.mods
 
-  for call in editor.shortcuts {
-  if call.mods == mods && call.key == key {
-  call.call(editor)
-  return
-  }
-  }
-  }
+		#partial switch event.key.keyCode {
+		case .ESCAPE:
+			if pressed {
+				editor_escape(editor)
+			}
 
-  @(export)
-  oc_on_mouse_move :: proc "c" (x, y, dx, dy: f32) {
-  ed.mouse_position = { x, y }
-  }
+		case .TAB:
+			if pressed {
+				// ed.show_theme = !ed.show_theme
+				editor_tab_shift(editor)
+			}
 
-  @(export)
-  oc_on_raw_event :: proc "c" (event: ^oc.event) {
-  scratch := oc.scratch_begin()
-  defer oc.scratch_end(scratch)
+		case .BACKSPACE:
+			if pressed || event.key.action == .REPEAT {
+				editor.write_time = 0
+				builder := editor_write_cycle_builder(editor)
+				if .MAIN_MODIFIER in event.key.mods {
+					strings.builder_reset(builder)
+				} else {
+					strings.pop_rune(builder)
+				}
+			}
 
-  // ui := &core.ui_context
-  // oc.input_process_event(&ui.frameArena, &ui.input, event)
+		case .S:
+			if pressed {
+				if .CMD in mods && .SHIFT in mods {
+					editor_save_to(editor)
+				} else if .CMD in mods {
+					editor_save(editor)
+				}
+			}
 
-  oc.ui_process_event(event)
+		case .O:
+			if pressed {
+				if .CMD in mods && .SHIFT in mods {
+					editor_load_from(editor)
+				} else if .CMD in mods {
+					editor_load(editor)
+				}
+			}
 
-  // core.last_input = core.input
-  // oc.input_process_event(scratch.arena, &core.input, event)
+		case .ENTER:
+			if pressed {
+				editor_insert_cycle(editor)
+			}
+		}
 
-  // keyboard_state := &core.input.keyboard
-  // last_keyboard_state := &core.last_input.keyboard
-  // keys := keyboard_state.keys
+	case .KEYBOARD_CHAR:
+		builder := editor_write_cycle_builder(editor)
+		strings.write_rune(builder, rune(event.character.codepoint))
+		editor.write_time = 0
 
-  // if key_pressed(keyboard_state, last_keyboard_state, .ENTER) {
-  // 	context = runtime.default_context()
-  // 	grid_init(core.game.grid)
-  // }
+	case .MOUSE_MOVE:
+		qwe.input_mouse_move(ed.ui, int(event.mouse.x), int(event.mouse.y))
 
-  // core.game.spawn_speedup =
+	case .MOUSE_WHEEL:
+		qwe.input_scroll(ed.ui, int(event.mouse.deltaX), int(event.mouse.deltaY))
+
+	case .MOUSE_BUTTON:
+		down := event.key.action == .PRESS
+
+		if down {
+			if event.key.button == .LEFT {
+				qwe.input_mouse_down(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Left)
+			} else if event.key.button == .RIGHT {
+				qwe.input_mouse_down(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Right)
+			}
+		} else {
+			if event.key.button == .LEFT {
+				qwe.input_mouse_up(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Left)
+			} else if event.key.button == .RIGHT {
+				qwe.input_mouse_up(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Right)
+			}
+		}
+	}
 }

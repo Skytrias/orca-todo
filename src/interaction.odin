@@ -6,196 +6,11 @@ import "core:math"
 import "core:strings"
 import oc "core:sys/orca"
 import "qwe"
+import "uuid"
 
 TASK_MIN_SIZE :: 100
 TASK_GAP :: 2
 TASK_TEXT_SIZE :: 22
-
-// editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
-// 	oc.set_font(editor.font_regular)
-// 	oc.set_font_size(editor.font_size)
-
-// 	ui := editor.ui
-
-// 	qwe.element_margin(ui, 0)
-// 	qwe.begin(ui)
-// 	defer qwe.end(ui, 0.05)
-
-// 	{
-// 		qwe.element_cut(ui, .Left, 200)
-// 		sidebar := panel_begin(ui, "sidebar", {.Background, .Clip_Outer, .Border_Right})
-// 		defer panel_end(ui)
-
-// 		// defer vscrollbar(ui, "vscroll")
-
-// 		editor_fetch_states(editor)
-// 		editor_fetch_tags(editor)
-// 		filter_index: int
-
-// 		{
-// 			qwe.element_margin(ui, 10)
-// 			qwe.element_pct(ui, .Top, 50)
-// 			panel := panel_begin(ui, "sub1", {.Border_Bottom})
-// 			defer panel_end(ui)
-
-// 			defer vscrollbar(ui, "vscroll")
-
-// 			qwe.element_cut(ui, .Top, 40)
-// 			label_aligned(ui, "States", .Center)
-// 			panel.cut_gap = 5
-// 			for key, value in editor.all_states {
-// 				selected := editor.filters_state[key]
-// 				filter_hash := fmt.tprintf("state%d", filter_index)
-// 				value_text := fmt.tprintf("%d", value)
-// 				element := bstate_button(ui, key, value_text, filter_hash, selected, false)
-
-// 				if qwe.left_clicked(ui, element) {
-// 					editor.filters_state[key] = !selected
-// 				}
-
-// 				if qwe.right_clicked(ui, element) {
-// 					editor_select_or_solo_filter(&editor.filters_state, key)
-// 				}
-
-// 				filter_index += 1
-// 			}
-// 		}
-
-// 		{
-// 			qwe.element_margin(ui, 10)
-// 			qwe.element_fill(ui)
-// 			panel := panel_begin(ui, "sub2", {})
-// 			defer panel_end(ui)
-
-// 			defer vscrollbar(ui, "vscroll")
-
-// 			qwe.element_cut(ui, .Top, 40)
-// 			label_aligned(ui, "Tags", .Center)
-// 			panel.cut_gap = 5
-// 			for key, value in editor.all_tags {
-// 				selected := editor.filters_tag[key]
-// 				filter_hash := fmt.tprintf("state%d", filter_index)
-// 				value_text := fmt.tprintf("%d", value)
-// 				element := bstate_button(ui, key, value_text, filter_hash, selected, true)
-
-// 				if qwe.left_clicked(ui, element) {
-// 					editor.filters_tag[key] = !selected
-// 				}
-
-// 				if qwe.right_clicked(ui, element) {
-// 					editor_select_or_solo_filter(&editor.filters_tag, key)
-// 				}
-// 				filter_index += 1
-// 			}
-// 		}
-
-// 		// qwe.element_cut(ui, .Bottom, 40)
-// 		// if button(ui, "RNG") {
-// 		// 	if editor.filter_single == nil {
-// 		// 		editor_random_pick(editor)
-// 		// 	} else {
-// 		// 		editor.filter_single = nil
-// 		// 	}
-// 		// }
-// 	}
-
-// 	// Text display
-// 	{
-// 		qwe.element_cut(ui, .Top, 50)
-// 		panel_begin(ui, "text display", {.Background, .Border_Bottom})
-// 		defer panel_end(ui)
-
-// 		qwe.element_fill(ui)
-// 		label_text := fmt.tprintf("Task: %s##text_display", editor.hovered.text)
-// 		task_text_display(ui, label_text, editor.hovered.current)
-// 	}
-
-// 	// text writing
-// 	{
-// 		qwe.element_margin(ui, 5)
-// 		qwe.element_cut(ui, .Bottom, 50)
-// 		panel_begin(ui, "write", {.Background, .Border_Top})
-// 		defer panel_end(ui)
-
-// 		qwe.element_cut(ui, .Left, 100)
-// 		label_names := [3]string{"Task", "State", "Tag"}
-// 		if button(ui, label_names[editor.write_cycle], {}) {
-// 			editor.write_cycle = (editor.write_cycle + 1) % 3
-// 		}
-
-// 		qwe.element_fill(ui)
-// 		builder := editor_write_cycle_builder(editor)
-// 		write := fmt.tprintf("%s##builder", strings.to_string(builder^))
-// 		write_alpha := editor_write_time_unit(editor)
-// 		label_underlined(ui, write, .Center, write_alpha)
-// 	}
-
-// 	{
-// 		qwe.element_fill(ui)
-// 		qwe.element_margin(ui, 10)
-// 		panel := panel_begin(ui, "inner", {.Background})
-// 		defer panel_end(ui)
-
-// 		// defer vscrollbar(ui, "vscroll")
-
-// 		panel_width := panel.layout_start.r - panel.layout_start.l
-// 		task_spacing := 5
-// 		task_iter_count, task_size := get_task_iter_count(
-// 			TASK_MIN_SIZE,
-// 			f32(panel_width),
-// 			f32(task_spacing),
-// 		)
-
-// 		tasks := editor_filtered_tasks(editor)
-// 		x, y: int
-// 		editor.hovered.direction = -1
-// 		for task in tasks {
-// 			if x == task_iter_count {
-// 				x = 0
-// 				y += 1
-// 			}
-
-// 			task_x := x * int(task_size) + x * task_spacing
-// 			task_y := y * int(task_size) + y * task_spacing
-// 			task_rect := qwe.Rect{task_x, task_x + int(task_size), task_y, task_y + int(task_size)}
-
-// 			qwe.element_margin(ui, 0)
-// 			qwe.element_gap(ui, 0)
-// 			qwe.element_set_bounds_relative(ui, task_rect)
-// 			task_panel := task_panel_begin(ui, task)
-// 			defer task_panel_end(ui, task)
-
-// 			if qwe.is_hovered(ui, task_panel) {
-// 				editor.hovered.text = task.content
-// 				editor.hovered.direction = 1
-// 			}
-
-// 			if qwe.right_clicked(ui, task_panel) {
-// 				editor_modify_set(editor, task)
-// 			}
-
-// 			// qwe.element_cut(ui, .Top, int(task_size) / 2)
-// 			// task_sub_label(ui, task.state, false)
-// 			// task_sub_label(ui, task.tag, true)
-
-// 			// bl := qwe.Rect{0, int(task_size), int(task_size) - 30, int(task_size)}
-// 			// bl.t -= 4
-// 			// bl.b -= 4
-// 			// bl.l += 4
-// 			// bl.r -= 4
-// 			// qwe.element_set_bounds_relative(ui, bl)
-// 			// if hover_button(ui, "DEL") {
-// 			// 	editor_task_remove(editor, task)
-
-// 			// 	if task == editor.task_modify {
-// 			// 		editor.task_modify = nil
-// 			// 		editor_write_reset(editor)
-// 			// 	}
-// 			// }
-
-// 			x += 1
-// 		}
-// 	}
 
 // 	// theme overlay
 // 	if editor.show_theme {
@@ -217,27 +32,6 @@ TASK_TEXT_SIZE :: 22
 // 	}
 // }
 
-// calculate how many tasks can be displayed in a single row
-get_task_iter_count :: proc(
-	task_size: f32,
-	panel_width: f32,
-	spacingx: f32,
-) -> (
-	iter_count: int,
-	final_task_size: f32,
-) {
-	full_width := panel_width
-	suggested_count := full_width / task_size
-	spacing_size := spacingx * (suggested_count - 1)
-	// spacing_size := f32(0)
-
-	iter_count_float := max((full_width - spacing_size) / task_size, 1)
-	iter_count = int(iter_count_float)
-	task_space := iter_count_float * task_size
-	final_task_size = task_space / f32(iter_count)
-	return
-}
-
 editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 	oc.set_font(editor.font_regular)
 	oc.set_font_size(editor.font_size)
@@ -248,6 +42,178 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 	qwe.begin(ui)
 	defer qwe.end(ui, 0.05)
 
-	qwe.element_cut(ui, .Top, 50)
-	button(ui, "Hello world", {})
+	{
+		qwe.element_cut(ui, .Top, 50)
+		panel := panel_begin(ui, "top", {.Background, .Border_Bottom})
+		defer panel_end(ui)
+
+		qwe.element_fill(ui)
+		qwe.element_text_yalign(ui, .Center)
+		write := fmt.tprintf("%s##builder", strings.to_string(editor.write))
+		write_alpha := editor_write_time_unit(editor)
+		label_underlined(ui, write, .Center, write_alpha)
+	}
+
+	CELLX_SIZE :: 150
+	CELLY_SIZE :: 150
+	for y in 0 ..< len(editor.tags) + 1 {
+		yy := (y + 1) * CELLY_SIZE
+		oc.move_to(CELLX_SIZE, f32(yy))
+		oc.line_to(f32(CELLX_SIZE + CELLX_SIZE * len(editor.states)), f32(yy))
+		oc.set_width(2)
+		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
+		oc.stroke()
+	}
+	for x in 0 ..< len(editor.states) + 1 {
+		xx := (x + 1) * CELLX_SIZE
+		oc.move_to(f32(xx), CELLY_SIZE)
+		oc.line_to(f32(xx), f32(CELLY_SIZE + CELLY_SIZE * len(editor.tags)))
+		oc.set_width(2)
+		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
+		oc.stroke()
+	}
+
+	task_matches := make([dynamic]^Task, 0, 128, context.temp_allocator)
+	cell_hovered: bool
+	cell_index: int
+	editor.task_hovering = false
+	drag_end := !editor.task_dragging && editor.task_drag != {}
+	// tags
+	for tag, y in editor.tags {
+		xx := 0
+		yy := (y + 1) * CELLY_SIZE
+		to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
+		qwe.element_set_bounds_relative(ui, to)
+		qwe.element_text_align(ui, .End, .Center)
+		label_highlight(ui, tag.description, editor.write_hover.y == tag.id)
+
+		// states
+		for state, x in editor.states {
+			if y == 0 {
+				xx := (x + 1) * CELLX_SIZE
+				yy := 0
+				to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
+				qwe.element_set_bounds_relative(ui, to)
+				qwe.element_text_align(ui, .Center, .End)
+				label_highlight(ui, state.description, editor.write_hover.x == state.id)
+			}
+
+			tasks_find_match_ids(&task_matches, editor.tasks[:], state.id, tag.id)
+
+			// cell
+			xx := (x + 1) * CELLX_SIZE
+			yy := (y + 1) * CELLY_SIZE
+			to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
+			qwe.element_set_bounds_relative(ui, to)
+			text_display := fmt.tprintf("%d", len(task_matches))
+			text_hash := fmt.tprintf("%d", cell_index)
+			qwe.element_text_align(ui, .Center, .Center)
+			sub := task_panel_begin(ui, text_hash)
+			defer task_panel_end(ui, text_display)
+			if qwe.is_hovered(ui, sub) {
+				editor.write_hover = {state.id, tag.id}
+				cell_hovered = true
+
+				if drag_end {
+					task := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
+					if task != nil {
+						task.state = state.id
+						task.tag = tag.id
+					}
+				}
+			}
+
+			// draw tasks
+			task_step_count := 10
+			task_size := CELLX_SIZE / task_step_count
+			task_x: int
+			task_y: int
+			for task, task_index in task_matches {
+				if task_x >= task_step_count {
+					task_x = 0
+					task_y += 1
+				}
+
+				xx := (task_x) * task_size
+				yy := (task_y) * task_size
+				to := qwe.Rect{xx, xx + task_size, yy, yy + task_size}
+				qwe.element_set_bounds_relative(ui, to)
+				task_element := task_small(ui, task)
+				if qwe.is_hovered(ui, task_element) {
+					editor.task_hovered = task.id
+					editor.task_hovering = true
+				}
+				if qwe.dragging(ui, task_element) {
+					editor.task_drag = task.id
+					editor.task_dragging = true
+				}
+				if qwe.was_focused(ui, task_element) {
+					editor.task_dragging = false
+				}
+				task_x += 1
+			}
+
+			cell_index += 1
+		}
+	}
+
+	if drag_end {
+		editor.task_drag = {}
+	}
+
+	if !cell_hovered {
+		editor.write_hover = {}
+	}
+
+	if editor.task_hover_unit > 0 {
+		width := 300
+		height := 50
+		yoffset := 10
+		to := qwe.Rect {
+			ui.mouse_position.x - width / 2,
+			ui.mouse_position.x + width / 2,
+			ui.mouse_position.y - height - yoffset,
+			ui.mouse_position.y - yoffset,
+		}
+		qwe.element_set_bounds(ui, to)
+		panel := panel_overlay_begin(ui, "hoverinfo", editor.task_hover_unit, {})
+		defer panel_end(ui)
+
+		task := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
+		if task != nil {
+			qwe.element_fill(ui)
+			qwe.element_text_align(ui, .Center, .Center)
+			label_alpha(ui, task.content, editor.task_hover_unit * 2, {})
+		}
+	}
+}
+
+task_header_count :: proc(tasks: []Task, state, tag: uuid.Guid) -> (result: int) {
+	for task in tasks {
+		if task.state == state && task.tag == tag {
+			result += 1
+		}
+	}
+
+	return
+}
+
+tasks_find_match_ids :: proc(fill: ^[dynamic]^Task, tasks: []Task, state, tag: uuid.Guid) {
+	clear(fill)
+
+	for &task in tasks {
+		if task.state == state && task.tag == tag {
+			append(fill, &task)
+		}
+	}
+}
+
+tasks_find_match_id :: proc(tasks: []Task, id: uuid.Guid) -> ^Task {
+	for &task in tasks {
+		if task.id == id {
+			return &task
+		}
+	}
+
+	return nil
 }

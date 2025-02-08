@@ -6,9 +6,6 @@ import "core:strings"
 import oc "core:sys/orca"
 import "qwe"
 
-// TODO add number on the side of the filter to show how many things there are
-// statusbar
-
 ed: Editor
 
 main :: proc() {
@@ -90,7 +87,7 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 		text := oc.clipboard_pasted_text(&editor.input)
 
 		if text != "" {
-			write := editor_write_cycle_builder(editor)
+			write := &editor.write
 			strings.write_string(write, text)
 		}
 	}
@@ -110,13 +107,13 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 		case .TAB:
 			if pressed {
 				// ed.show_theme = !ed.show_theme
-				editor_tab_shift(editor)
+				// editor_tab_shift(editor)
 			}
 
 		case .BACKSPACE:
 			if pressed || event.key.action == .REPEAT {
 				editor.write_time = 0
-				builder := editor_write_cycle_builder(editor)
+				builder := &editor.write
 				if .MAIN_MODIFIER in event.key.mods {
 					strings.builder_reset(builder)
 				} else {
@@ -144,12 +141,12 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 
 		case .ENTER:
 			if pressed {
-				editor_insert_cycle(editor)
+				editor_insert_task(editor)
 			}
 		}
 
 	case .KEYBOARD_CHAR:
-		builder := editor_write_cycle_builder(editor)
+		builder := &editor.write
 		strings.write_rune(builder, rune(event.character.codepoint))
 		editor.write_time = 0
 

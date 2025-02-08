@@ -11,11 +11,11 @@ Panel_Flag :: enum {
 	Rounded,
 	Background,
 	Clip_Outer,
-	Overlay,
 	Border_Left,
 	Border_Right,
 	Border_Top,
 	Border_Bottom,
+	Shadow,
 }
 Panel_Flags :: bit_set[Panel_Flag]
 
@@ -32,18 +32,27 @@ clip_push_bounds :: proc(bounds: qwe.Rect) {
 	oc.clip_push(x, y, w, h)
 }
 
-panel_begin :: proc(ctx: ^qwe.Context, name: string, flags: Panel_Flags) -> ^qwe.Element {
-	element := qwe.element_begin(ctx, name, {})
+panel_begin :: proc(
+	ctx: ^qwe.Context,
+	name: string,
+	flags: Panel_Flags,
+	element_flags: qwe.Element_Flags = {},
+) -> ^qwe.Element {
+	element := qwe.element_begin(ctx, name, element_flags)
 	inspector_add(element)
 
 	rounded := .Rounded in flags
+	if .Shadow in flags {
+		oc.set_color(oc.color_srgba(0, 0, 0, 0.5))
+		x, y, w, h := qwe.rect_flat(qwe.rect_margin(element.bounds, -5))
+		oc.rounded_rectangle_fill(x, y, w, h, 10)
+	}
+
 	if .Background in flags {
 		// color := ed.theme.border_highlight
 		// color.z = color.z * element.hover_children
 		// color.a = color.a * element.hover_children
 		element_background(element.bounds, ed.theme.panel, rounded)
-	} else if .Overlay in flags {
-		element_background(element.bounds, ed.theme.overlay, rounded)
 	}
 
 	if .Border_Left in flags {
@@ -88,6 +97,30 @@ panel_end :: proc(ctx: ^qwe.Context) {
 	oc.clip_pop()
 }
 
+panel_overlay_begin :: proc(
+	ctx: ^qwe.Context,
+	name: string,
+	hover: f32,
+	flags: qwe.Element_Flags = {},
+) -> ^qwe.Element {
+	element := qwe.element_begin(ctx, name, flags)
+	inspector_add(element)
+
+	rounded := true
+	oc.set_color(oc.color_srgba(0, 0, 0, 0.5 * hover))
+	x, y, w, h := qwe.rect_flat(qwe.rect_margin(element.bounds, -5))
+	oc.rounded_rectangle_fill(x, y, w, h, 10)
+
+	panel_range := ed.theme.panel
+	panel_range.a *= hover
+	element_background(element.bounds, panel_range, rounded)
+
+	clip_push_bounds(element.bounds)
+
+	// element_border(element.bounds, color, ed.theme.border_highlight_width, rounded)
+	return element
+}
+
 spacer :: proc(ctx: ^qwe.Context, name: string, amount: int, direction: qwe.Cut_Direction) {
 	qwe.element_cut(ctx, direction, amount)
 	element := qwe.element_make(ctx, name, {})
@@ -100,18 +133,61 @@ color_display :: proc(ctx: ^qwe.Context, name: string, range: [4]f32) {
 	element_background_and_border(element.bounds, range, ed.theme.border, true)
 }
 
-label_aligned :: proc(
-	ctx: ^qwe.Context,
-	text: string,
-	alignx: qwe.Text_Align,
-	flags: qwe.Element_Flags = {},
-) {
-	qwe.element_text_xalign(ctx, alignx)
+label_simple :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags = {}) {
 	element := qwe.element_make(ctx, text, flags)
 	inspector_add(element)
 
 	// render
 	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
+}
+
+label_alpha :: proc(ctx: ^qwe.Context, text: string, alpha: f32, flags: qwe.Element_Flags = {}) {
+	element := qwe.element_make(ctx, text, flags)
+	inspector_add(element)
+
+	// render
+	range := ed.theme.text1
+	range.a = min(range.a * alpha, 1)
+	element_text(element.text_align, element.bounds, element.text_label, range)
+}
+
+label_hover :: proc(
+	ctx: ^qwe.Context,
+	text: string,
+	flags: qwe.Element_Flags = {},
+) -> ^qwe.Element {
+	element := qwe.element_make(ctx, text, flags)
+	inspector_add(element)
+
+	range := ed.theme.button
+	range.a *= element.hover
+	element_background(element.bounds, range, false)
+
+	// render
+	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
+	return element
+}
+
+label_highlight :: proc(
+	ctx: ^qwe.Context,
+	text: string,
+	state: bool,
+	flags: qwe.Element_Flags = {},
+) {
+	element := qwe.element_make(ctx, text, flags)
+	inspector_add(element)
+	element.highlight_state = state
+
+	// render
+	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, element.text_label)
+	x, y := text_position(element.text_align, element.bounds, text_metrics)
+	text_color := color_blend(
+		color_get(ed.theme.text1),
+		oc.color_srgba(1, 0, 0, 1),
+		element.highlight,
+	)
+	oc.set_color(text_color)
+	oc.text_fill(x, y, element.text_label)
 }
 
 label_underlined :: proc(
@@ -127,7 +203,7 @@ label_underlined :: proc(
 
 	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, element.text_label)
 	x, y := text_position(element.text_align, element.bounds, text_metrics)
-	text_color := ed.task_modify == nil ? ed.theme.text1 : ed.theme.text_edit
+	text_color := ed.theme.text1
 	text_color.a = underline_alpha * 0.5 + 0.5
 	color_set(text_color)
 	oc.text_fill(x, y, element.text_label)
@@ -224,7 +300,8 @@ hsva_slider :: proc(ctx: ^qwe.Context, range: ^[4]f32, name: string) {
 	defer panel_end(ctx)
 
 	qwe.element_cut(ctx, .Left, 150)
-	label_aligned(ctx, name, .End)
+	qwe.element_text_align(ctx, .End, .Center)
+	label_simple(ctx, name)
 
 	qwe.element_cut(ctx, .Right, 40)
 	color_display(ctx, "color", range^)
@@ -287,81 +364,34 @@ color_blend :: proc(a, b: oc.color, unit: f32) -> (res: oc.color) {
 	return res
 }
 
-task_panel_begin :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
-	name := fmt.tprintf("Task##%d", string(task.id[:]))
-	element := qwe.element_begin(ctx, name, {})
+task_panel_begin :: proc(ctx: ^qwe.Context, text_hash: string) -> ^qwe.Element {
+	element := qwe.element_begin(ctx, text_hash, {})
 	inspector_add(element)
-
 	clip_push_bounds(element.clipped)
 	return element
 }
 
-task_panel_end :: proc(ctx: ^qwe.Context, task: ^Task) {
+task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 	element := ctx.parent_stack[len(ctx.parent_stack) - 1]
 
-	x, y, w, h := qwe.rect_flat(element.bounds)
-	// color_set(ed.theme.panel)
-	// element_background(element.bounds, task_filter_range(task.state, is_tag), false)
-	// oc.set_width(15)
-	// oc.rounded_rectangle_stroke(x, y, w, h, 15)
+	range := ed.theme.button
+	range.a = 0.75
+	range.a *= element.hover_children
+	element_background(element.bounds, range, false)
 
-	aa := color_get(task_filter_range(task.state, false))
-	bb := color_get(task_filter_range(task.tag, true))
-
-	oc.set_color(aa)
-	oc.move_to(x, y)
-	oc.line_to(x, y + h)
-	oc.line_to(x + w, y + h)
-	oc.line_to(x, y)
-	oc.fill()
-
-	oc.set_color(bb)
-	oc.move_to(x + w, y + h)
-	oc.line_to(x + w, y)
-	oc.line_to(x, y)
-	oc.line_to(x + w, y + h)
-	oc.fill()
-
-	// aa := task_filter_range(task.state, false)
-	// aa.x = max(aa.x - element.hover * 0.25, 0)
-	// aa.z = max(aa.z - element.hover * 0.25, 0)
-	// bb := task_filter_range(task.tag, true)
-	// bb.x = max(bb.x - element.hover * 0.25, 0)
-	// bb.z = max(bb.z - element.hover * 0.25, 0)
-	// a := color_get(aa)
-	// b := color_get(bb)
-	// c := color_get(ed.theme.panel)
-	// oc.set_gradient(.LINEAR, c, b, c, a)
-	// oc.rounded_rectangle_fill(x, y, w, h, 10)
-
-	// oc.set_width(element.hover * 5)
-	// color := ed.theme.panel
-	// color_set(color)
-	// oc.move_to(x + w, y)
-	// oc.line_to(x, y + h)
-	// oc.stroke()
-
-	if ed.task_modify == task {
-		range := ed.theme.text_edit
-		range.a *= editor_write_time_unit(&ed)
-		oc.set_max_joint_excursion(10)
-		oc.set_joint(.MITER)
-		element_border(element.bounds, range, 4, false)
-	}
+	// render
+	element_text(element.text_align, element.bounds, text_display, ed.theme.text1)
 
 	panel_end(ctx)
 }
 
-task_text_display :: proc(ctx: ^qwe.Context, text: string, hover: f32) {
-	qwe.element_text_xalign(ctx, .Center)
-	element := qwe.element_make(ctx, text, {})
+task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
+	element := qwe.element_make(ctx, string(task.id[:]), {})
 	inspector_add(element)
 
 	// render
-	element_background(element.bounds, ed.theme.panel, false)
-	text_color := ed.theme.text1
-	text_color.a = hover
-	element_text(element.text_align, element.bounds, element.text_label, text_color)
+	element_background(element.bounds, {0, 0, 0.25, 1}, true)
+	return element
 }
 
 bstate_button :: proc(

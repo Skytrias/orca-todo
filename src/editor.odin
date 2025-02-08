@@ -25,69 +25,62 @@ Task_Hovered :: struct {
 }
 
 Editor :: struct {
-	surface:         oc.surface,
-	renderer:        oc.canvas_renderer,
-	canvas:          oc.canvas_context,
-	font_regular:    oc.font, // font global
-	font_icons:      oc.font,
-	window_size:     oc.vec2,
-	mouse_position:  oc.vec2,
-	font_size:       f32,
-	file_filters:    oc.str8_list,
-	file_arena:      oc.arena,
-	input:           oc.input_state,
+	surface:             oc.surface,
+	renderer:            oc.canvas_renderer,
+	canvas:              oc.canvas_context,
+	font_regular:        oc.font, // font global
+	font_icons:          oc.font,
+	window_size:         oc.vec2,
+	mouse_position:      oc.vec2,
+	font_size:           f32,
+	file_filters:        oc.str8_list,
+	file_arena:          oc.arena,
+	input:               oc.input_state,
 
 	// interactions
-	task_modify:     ^Task,
-	hovered:         Task_Hovered,
-	task_rest_space: f32,
-	show_theme:      bool,
-
-	// shortcuts
-	shortcuts:       [dynamic]Editor_Shortcut,
+	write:               strings.Builder,
+	write_time:          f32,
+	write_hover:         [2]uuid.Guid,
 
 	// task states
-	tasks:           [dynamic]Task,
-	tasks_filtered:  [dynamic]^Task,
-
-	// filtering
-	filters_state:   map[string]bool,
-	filters_tag:     map[string]bool,
-	filter_single:   ^Task,
-	all_states:      map[string]int,
-	all_tags:        map[string]int,
+	tasks:               [dynamic]Task,
+	states:              [dynamic]Task_Header,
+	tags:                [dynamic]Task_Header,
 
 	// log state
-	logger:          log.Logger,
-	ui:              ^qwe.Context,
-	theme:           Theme,
+	logger:              log.Logger,
+	ui:                  ^qwe.Context,
+	theme:               Theme,
+
+	// task hovering
+	task_hovered:        uuid.Guid, // sticks around unless deleted
+	task_hovering:       bool,
+	task_hover_unit:     f32,
+	task_hover_position: [2]f32,
+
+	// task dragging
+	task_drag:           uuid.Guid,
+	task_dragging:       bool,
 
 	// random state
-	rng:             rand.Default_Random_State,
-
-	// textbox custom
-	write_task:      Task,
-	write:           [3]strings.Builder,
-	write_time:      f32,
-	write_cycle:     int,
+	rng:                 rand.Default_Random_State,
 }
 
-// TODO actually manage memory
+Task_Header :: struct {
+	id:          uuid.Guid,
+	description: string,
+}
+
 Task :: struct {
-	content: string,
-	state:   string,
-	tag:     string,
-	id:      uuid.Guid,
-}
+	id:       uuid.Guid,
+	content:  string,
+	state:    uuid.Guid,
+	tag:      uuid.Guid,
 
-Editor_Shortcut :: struct {
-	group:       string,
-	name:        string,
-	hide:        bool,
-	key_display: string,
-	key:         oc.key_code,
-	mods:        oc.keymod_flags,
-	call:        proc(_: ^Editor),
+	// animation
+	bounds:   qwe.Rect,
+	position: [2]f32,
+	size:     f32,
 }
 
 Theme :: struct {
@@ -149,13 +142,6 @@ editor_init :: proc(editor: ^Editor) {
 	// editor.font_icons = oc.font_create_from_path("icofont.ttf", u32(len(ranges_material)), &ranges_material[0])
 
 	editor.tasks = make([dynamic]Task, 0, 128)
-	editor.tasks_filtered = make([dynamic]^Task, 0, 128)
-
-	editor.filters_state = make(map[string]bool, 32)
-	editor.filters_tag = make(map[string]bool, 32)
-
-	editor.all_states = make(map[string]int, 32)
-	editor.all_tags = make(map[string]int, 32)
 
 	editor.logger = oc.create_odin_logger()
 	context.logger = editor.logger
@@ -166,8 +152,6 @@ editor_init :: proc(editor: ^Editor) {
 	log.info("Startup done")
 	oc.arena_init(&editor.file_arena)
 	oc.str8_list_push(&editor.file_arena, &editor.file_filters, "md")
-
-	editor_shortcuts_init(editor)
 
 	editor.theme = {
 		text1                  = {0, 0, 0.1, 1},
@@ -206,40 +190,24 @@ editor_init :: proc(editor: ^Editor) {
 
 	editor.ui = new(qwe.Context)
 	qwe.init(editor.ui)
-
-	for i in 0 ..< len(editor.write) {
-		strings.builder_init(&editor.write[i], 0, 128)
-	}
 }
 
 editor_destroy :: proc(editor: ^Editor) {
-	for i in 0 ..< len(editor.write) {
-		delete(editor.write[i].buf)
-	}
-	editor_shortcuts_destroy(editor)
 	delete(editor.tasks)
-	delete(editor.filters_state)
-	delete(editor.filters_tag)
-	delete(editor.all_states)
-	delete(editor.all_tags)
 }
 
 editor_update_start :: proc(editor: ^Editor) {
-	for task in editor.tasks {
-		if task.state not_in editor.filters_state {
-			editor.filters_state[task.state] = false
-		}
-
-		if task.tag not_in editor.filters_tag {
-			editor.filters_tag[task.tag] = false
-		}
-	}
+	qwe.animate_unit(&editor.task_hover_unit, 0.02, editor.task_hovering)
 }
 
 editor_update_end :: proc(editor: ^Editor) {
 	dt := f32(0.01)
-	editor.hovered.current = clamp(editor.hovered.current + editor.hovered.direction * dt, 0, 1)
 	editor.write_time += dt
+
+	hovered := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
+	if hovered == nil {
+		editor.task_hovered = {}
+	}
 }
 
 Task_Inner_Group :: struct {
@@ -248,46 +216,46 @@ Task_Inner_Group :: struct {
 }
 
 editor_save_builder :: proc(editor: ^Editor, builder: ^strings.Builder) {
-	full := make(map[string]map[string]Task_Inner_Group, 32)
-	for task in editor.tasks {
-		if task.tag not_in full {
-			full[task.tag] = make(map[string]Task_Inner_Group, 32)
-		}
+	// full := make(map[string]map[string]Task_Inner_Group, 32)
+	// for task in editor.tasks {
+	// 	if task.tag not_in full {
+	// 		full[task.tag] = make(map[string]Task_Inner_Group, 32)
+	// 	}
 
-		mapping := &full[task.tag]
-		if task.state not_in mapping {
-			mapping[task.state] = {}
-		}
+	// 	mapping := &full[task.tag]
+	// 	if task.state not_in mapping {
+	// 		mapping[task.state] = {}
+	// 	}
 
-		group := &mapping[task.state]
-		group.content[group.content_index] = task.content
-		group.content_index += 1
-	}
+	// 	group := &mapping[task.state]
+	// 	group.content[group.content_index] = task.content
+	// 	group.content_index += 1
+	// }
 
-	tag_count: int
+	// tag_count: int
 
-	for tag_key, tag_value in full {
-		if tag_count > 0 {
-			strings.write_byte(builder, '\n')
-		}
-		tag_count += 1
-		strings.write_string(builder, "# ")
-		strings.write_string(builder, tag_key)
-		strings.write_byte(builder, '\n')
+	// for tag_key, tag_value in full {
+	// 	if tag_count > 0 {
+	// 		strings.write_byte(builder, '\n')
+	// 	}
+	// 	tag_count += 1
+	// 	strings.write_string(builder, "# ")
+	// 	strings.write_string(builder, tag_key)
+	// 	strings.write_byte(builder, '\n')
 
-		for state_key, state_value in tag_value {
-			for i in 0 ..< state_value.content_index {
-				strings.write_byte(builder, '-')
-				strings.write_byte(builder, ' ')
-				strings.write_string(builder, "***")
-				strings.write_string(builder, state_key)
-				strings.write_string(builder, "***")
-				strings.write_byte(builder, ' ')
-				strings.write_string(builder, state_value.content[i])
-				strings.write_byte(builder, '\n')
-			}
-		}
-	}
+	// 	for state_key, state_value in tag_value {
+	// 		for i in 0 ..< state_value.content_index {
+	// 			strings.write_byte(builder, '-')
+	// 			strings.write_byte(builder, ' ')
+	// 			strings.write_string(builder, "***")
+	// 			strings.write_string(builder, state_key)
+	// 			strings.write_string(builder, "***")
+	// 			strings.write_byte(builder, ' ')
+	// 			strings.write_string(builder, state_value.content[i])
+	// 			strings.write_byte(builder, '\n')
+	// 		}
+	// 	}
+	// }
 }
 
 editor_save_to :: proc(editor: ^Editor) {
@@ -334,26 +302,26 @@ editor_save :: proc(editor: ^Editor) {
 }
 
 editor_load_from_string :: proc(editor: ^Editor, content: string) {
-	clear(&editor.tasks)
+	// clear(&editor.tasks)
 
-	// load the content into maps again
-	iter := string(content)
-	temp_tag: string
-	for line in strings.split_lines_iterator(&iter) {
-		if len(line) == 0 {
-			continue
-		}
+	// // load the content into maps again
+	// iter := string(content)
+	// temp_tag: string
+	// for line in strings.split_lines_iterator(&iter) {
+	// 	if len(line) == 0 {
+	// 		continue
+	// 	}
 
-		start := line[0]
+	// 	start := line[0]
 
-		if start == '#' {
-			temp_tag = line[2:]
-		} else if start == '-' {
-			head, mid, tail := strings.partition(line[2:], " ")
-			head_trimmed := strings.trim(head, "*")
-			append(&editor.tasks, task_make(tail, head_trimmed, temp_tag))
-		}
-	}
+	// 	if start == '#' {
+	// 		temp_tag = line[2:]
+	// 	} else if start == '-' {
+	// 		head, mid, tail := strings.partition(line[2:], " ")
+	// 		head_trimmed := strings.trim(head, "*")
+	// 		append(&editor.tasks, task_make(tail, head_trimmed, temp_tag))
+	// 	}
+	// }
 }
 
 editor_load_from :: proc(editor: ^Editor) {
@@ -405,148 +373,39 @@ editor_load :: proc(editor: ^Editor) {
 	editor_load_from_string(editor, string(content))
 }
 
-editor_fetch_states :: proc(editor: ^Editor) {
-	clear(&editor.all_states)
-	for task in editor.tasks {
-		if task.state != "" {
-			if task.state not_in editor.all_states {
-				editor.all_states[task.state] = 1
-			} else {
-				editor.all_states[task.state] += 1
-			}
-		}
-	}
-}
-
-editor_fetch_tags :: proc(editor: ^Editor) {
-	clear(&editor.all_tags)
-	for task in editor.tasks {
-		if task.tag != "" {
-			if task.tag not_in editor.all_tags {
-				editor.all_tags[task.tag] = 1
-			} else {
-				editor.all_tags[task.tag] += 1
-			}
-		}
-	}
-}
-
-editor_filtered_tasks :: proc(editor: ^Editor) -> []^Task {
-	clear(&editor.tasks_filtered)
-
-	if editor.filter_single != nil {
-		append(&editor.tasks_filtered, editor.filter_single)
-		return editor.tasks_filtered[:]
-	}
-
-	for &task in &editor.tasks {
-		tag_filtered := editor.filters_tag[task.tag]
-		state_filtered := editor.filters_state[task.state]
-
-		if !tag_filtered && !state_filtered {
-			append(&editor.tasks_filtered, &task)
-		}
-	}
-	return editor.tasks_filtered[:]
-}
-
-editor_select_or_solo_filter :: proc(filters: ^map[string]bool, current: string) {
-	current_filtered := filters[current]
-	if current_filtered {
-		for key, value in filters {
-			filters[key] = true
-		}
-		filters[current] = false
-		return
-	}
-
-	other_selected: bool
-	for key, value in filters {
-		if key != current && value {
-			other_selected = true
-			break
-		}
-	}
-
-	if other_selected {
-		for key, value in filters {
-			filters[key] = false
-		}
-	} else {
-		for key, value in filters {
-			filters[key] = true
-		}
-	}
-
-	filters[current] = false
-}
-
-editor_modify_set :: proc(editor: ^Editor, to: ^Task) {
-	editor.task_modify = to
-	for i in 0 ..< len(editor.write) {
-		strings.builder_reset(&editor.write[i])
-	}
-	strings.write_string(&editor.write[0], to.content)
-	strings.write_string(&editor.write[1], to.state)
-	strings.write_string(&editor.write[2], to.tag)
-}
-
-editor_accept_task_changes :: proc(editor: ^Editor) -> bool {
-	content := strings.trim_space(strings.to_string(editor.write[0]))
-	state := strings.trim_space(strings.to_string(editor.write[1]))
-	tag := strings.trim_space(strings.to_string(editor.write[2]))
-
-	if len(state) == 0 || len(tag) == 0 || len(content) == 0 {
-		return false
-	}
-
-	if editor.task_modify != nil {
-		task := editor.task_modify
-		task.content = strings.clone(content)
-		task.state = strings.clone(state)
-		task.tag = strings.clone(tag)
-		editor_write_reset(editor)
-		return true
-	}
-
-	return false
+task_header_make :: proc(description: string) -> Task_Header {
+	return {description = description, id = uuid.gen()}
 }
 
 editor_example :: proc(editor: ^Editor) {
 	clear(&editor.tasks)
 	context.random_generator = runtime.default_random_generator(&editor.rng)
-	append(&editor.tasks, task_make("Test1", "Backlog", "Plan1"))
-	append(&editor.tasks, task_make("Test2 Test Test", "Backlog", "Plan1"))
 
-	append(&editor.tasks, task_make("Test3", "WIP", "Plan2"))
-	append(&editor.tasks, task_make("Test4", "WIP", "Plan3"))
-	append(&editor.tasks, task_make("Test5", "Done", "Plan4"))
-	append(&editor.tasks, task_make("Test6", "Done", "Plan5"))
-	append(&editor.tasks, task_make("Test7", "Done", "Plan6"))
+	append(&editor.states, task_header_make("Backlog"))
+	append(&editor.states, task_header_make("WIP"))
+	append(&editor.states, task_header_make("Done"))
+	append(&editor.states, task_header_make("Dropped"))
 
-	append(&editor.tasks, task_make("Test8", "Done", "Plan3"))
-	append(&editor.tasks, task_make("Test9", "Done", "Plan3"))
-	append(&editor.tasks, task_make("Test11", "Done", "Plan3"))
-	append(&editor.tasks, task_make("Test11", "Done", "Plan3"))
-	append(
-		&editor.tasks,
-		task_make("ui_text_box_result should include *ui_box reference", "Open", "Orca"),
-	)
-	append(&editor.tasks, task_make("Add UI Styling Helpers or rework masking", "Open", "Orca"))
-	append(&editor.tasks, task_make("Add str8 versions of UI module calls", "Open", "Orca"))
-	append(
-		&editor.tasks,
-		task_make("Tooltips should not appear while resizing the window", "Open", "Orca"),
-	)
-}
+	append(&editor.tags, task_header_make("Plan1"))
+	append(&editor.tags, task_header_make("Plan2"))
+	append(&editor.tags, task_header_make("Plan3"))
+	append(&editor.tags, task_header_make("Plan4"))
 
-editor_task_clone :: proc(editor: ^Editor, task: ^Task) {
-	temp := task_make(
-		strings.clone(task.content),
-		strings.clone(task.state),
-		strings.clone(task.tag),
-	)
-	append(&editor.tasks, temp)
+	backlog := editor.states[0].id
+	plan1 := editor.tags[0].id
+
+	append(&editor.tasks, task_make("Test1", backlog, plan1))
+	append(&editor.tasks, task_make("Test2", backlog, plan1))
+	append(&editor.tasks, task_make("Test3", backlog, plan1))
+	append(&editor.tasks, task_make("Test4", backlog, plan1))
+	append(&editor.tasks, task_make("Test5", backlog, plan1))
+	append(&editor.tasks, task_make("Test6", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
 }
 
 editor_task_remove :: proc(editor: ^Editor, task: ^Task) {
@@ -583,122 +442,6 @@ hsluv_hash_color :: proc(
 	return oc.color_srgba(f32(r), f32(g), f32(b), alpha)
 }
 
-editor_shortcuts_init :: proc(editor: ^Editor) {
-	editor.shortcuts = make([dynamic]Editor_Shortcut, 0, 64)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "File",
-			name = "Save",
-			key_display = "S",
-			key = .S,
-			mods = {.CMD},
-			call = editor_save,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "File",
-			name = "Save To",
-			key_display = "S",
-			key = .S,
-			mods = {.CMD, .SHIFT},
-			call = editor_save_to,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "File",
-			name = "Load",
-			key_display = "O",
-			key = .O,
-			mods = {.CMD},
-			call = editor_load,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "File",
-			name = "Load From",
-			key_display = "O",
-			key = .O,
-			mods = {.CMD, .SHIFT},
-			call = editor_load_from,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Commands",
-			name = "Escape",
-			hide = true,
-			key = .ESCAPE,
-			mods = {},
-			call = editor_escape,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Commands",
-			name = "Tab Forward",
-			hide = true,
-			key = .TAB,
-			mods = {},
-			call = editor_tab_unshift,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Commands",
-			name = "Tab Backward",
-			hide = true,
-			key = .TAB,
-			mods = {.SHIFT},
-			call = editor_tab_shift,
-		},
-	)
-
-	// Theme
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Theme",
-			name = "Light",
-			key_display = "2",
-			key = ._2,
-			mods = {.CMD},
-			call = editor_theme_white,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Theme",
-			name = "Dark",
-			key = ._3,
-			key_display = "3",
-			mods = {.CMD},
-			call = editor_theme_black,
-		},
-	)
-	append(
-		&editor.shortcuts,
-		Editor_Shortcut {
-			group = "Theme",
-			name = "Show",
-			key = ._1,
-			key_display = "1",
-			mods = {.CMD},
-			call = editor_theme_toggle,
-		},
-	)
-}
-
 editor_theme_white :: proc(editor: ^Editor) {
 	oc.ui_set_theme(&oc.UI_LIGHT_THEME)
 }
@@ -707,100 +450,61 @@ editor_theme_black :: proc(editor: ^Editor) {
 	oc.ui_set_theme(&oc.UI_DARK_THEME)
 }
 
-editor_theme_toggle :: proc(editor: ^Editor) {
-	editor.show_theme = !editor.show_theme
-}
-
-editor_shortcuts_destroy :: proc(editor: ^Editor) {
-	delete(editor.shortcuts)
-}
-
 editor_escape :: proc(editor: ^Editor) {
-	if editor.task_modify != nil {
-		editor.task_modify = nil
+	if len(editor.write.buf) != 0 {
 		editor_write_reset(editor)
 		return
 	}
 }
 
-editor_tab_directional :: proc(editor: ^Editor, shifted: bool) {
-	editor.write_cycle = (editor.write_cycle + 1) % 3
-}
-
-editor_tab_unshift :: proc(editor: ^Editor) {
-	editor_tab_directional(editor, false)
-}
-
-editor_tab_shift :: proc(editor: ^Editor) {
-	editor_tab_directional(editor, true)
-}
-
-task_make :: proc(content, state, tag: string) -> Task {
+task_make :: proc(content: string, state, tag: uuid.Guid) -> Task {
 	return {content = content, state = state, tag = tag, id = uuid.gen()}
 }
 
-editor_random_pick :: proc(editor: ^Editor) {
-	tasks := editor_filtered_tasks(editor)
-
-	if len(tasks) == 0 {
-		return
-	}
-
-	context.random_generator = runtime.default_random_generator(&editor.rng)
-	result := rand.choice(tasks)
-	editor.filter_single = result
-}
-
-editor_write_cycle_builder :: proc(editor: ^Editor) -> ^strings.Builder {
-	return &editor.write[editor.write_cycle]
-}
-
-editor_insert_cycle :: proc(editor: ^Editor) -> bool {
-	if editor_accept_task_changes(editor) {
-		editor.task_modify = nil
-		return true
-	}
-
-	content := strings.trim_space(strings.to_string(editor.write[0]))
-	if len(content) == 0 {
-		return false
-	}
-
-	tasks := editor_filtered_tasks(editor)
-
-	state := strings.trim_space(strings.to_string(editor.write[1]))
-	if len(state) == 0 {
-		if len(tasks) > 0 {
-			state = tasks[len(tasks) - 1].state
-		} else {
-			return false
-		}
-	}
-
-	tag := strings.trim_space(strings.to_string(editor.write[2]))
-	if len(tag) == 0 {
-		if len(tasks) > 0 {
-			tag = tasks[len(tasks) - 1].tag
-		} else {
-			return false
-		}
-	}
-
-	editor.write_cycle = 0
-	context.random_generator = runtime.default_random_generator(&editor.rng)
-	task := task_make(strings.clone(content), strings.clone(state), strings.clone(tag))
-	editor_write_reset(editor)
-	editor.write_task = {}
-	append(&editor.tasks, task)
-	return true
-}
-
 editor_write_reset :: proc(editor: ^Editor) {
-	strings.builder_reset(&editor.write[0])
-	strings.builder_reset(&editor.write[1])
-	strings.builder_reset(&editor.write[2])
+	strings.builder_reset(&editor.write)
 }
 
 editor_write_time_unit :: proc(editor: ^Editor) -> f32 {
 	return abs(math.cos(editor.write_time))
+}
+
+editor_insert_task :: proc(editor: ^Editor) -> bool {
+	content := strings.trim_space(strings.to_string(editor.write))
+	if len(content) == 0 {
+		return false
+	}
+
+	if len(editor.states) == 0 || len(editor.tags) == 0 {
+		return false
+	}
+
+	// default
+	state := editor.states[0].id
+	tag := editor.tags[0].id
+
+	if editor.write_hover != {} {
+		state_header := task_header_find(editor.states[:], editor.write_hover.x)
+		tag_header := task_header_find(editor.tags[:], editor.write_hover.y)
+
+		if state_header != nil && tag_header != nil {
+			state = state_header.id
+			tag = tag_header.id
+		}
+	}
+
+	context.random_generator = runtime.default_random_generator(&editor.rng)
+	append(&editor.tasks, task_make(content, state, tag))
+	editor_write_reset(editor)
+	return true
+}
+
+task_header_find :: proc(headers: []Task_Header, id: uuid.Guid) -> ^Task_Header {
+	for &header in headers {
+		if header.id == id {
+			return &header
+		}
+	}
+
+	return nil
 }

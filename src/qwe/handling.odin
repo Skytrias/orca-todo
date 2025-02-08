@@ -11,6 +11,14 @@ right_clicked :: proc(ctx: ^Context, element: ^Element) -> bool {
 	return ctx.mouse_released == {.Right} && ctx.focus_id == element.id
 }
 
+dragging :: proc(ctx: ^Context, element: ^Element) -> bool {
+	return ctx.mouse_down == {.Left} && ctx.focus_id == element.id
+}
+
+was_focused :: proc(ctx: ^Context, element: ^Element) -> bool {
+	return ctx.focus_lost_id == element.id
+}
+
 scrollbar_final :: proc(element: ^Element) -> int {
 	final := element.layout.b - element.layout.t
 	return final + element.cut_gap

@@ -50,12 +50,13 @@ Context :: struct {
 	hover_stack:            [MAX_HOVER]^Element, // hover stack
 	hover_index:            int,
 	focus_id:               Id,
+	focus_lost_id:          Id,
 }
 
 Element_Flag :: enum {
 	Is_Parent,
 	Ignore_Self,
-	// Ignore_Descendents,
+	Ignore_Self_And_Descendants,
 }
 
 Element_Flags :: bit_set[Element_Flag]
@@ -89,6 +90,10 @@ Element :: struct {
 	hover_children_ran: bool,
 	hover:              f32,
 	focus:              f32,
+
+	// animation manual
+	highlight:          f32,
+	highlight_state:    bool,
 
 	// scroll
 	scroll:             [2]int,
@@ -125,7 +130,6 @@ begin :: proc(ctx: ^Context) {
 	ctx.window = element_begin(ctx, "!root!", {})
 }
 
-@(private)
 animate_unit :: proc(value: ^f32, dt: f32, increase: bool) {
 	add := increase ? dt : -dt
 	value^ = clamp(value^ + add, 0, 1)
@@ -142,6 +146,7 @@ end :: proc(ctx: ^Context, dt: f32) {
 	for id, &element in &ctx.elements {
 		animate_unit(&element.hover, dt, element.id == ctx.hover_id)
 		animate_unit(&element.focus, dt, element.id == ctx.focus_id)
+		animate_unit(&element.highlight, dt, element.highlight_state)
 
 		if element.id == ctx.focus_id {
 			element.parent.hover_children_ran = true
@@ -163,6 +168,10 @@ end :: proc(ctx: ^Context, dt: f32) {
 	ctx.mouse_released = {}
 	ctx.scroll_delta = {}
 	ctx.mouse_last_position = ctx.mouse_position
+
+	if ctx.focus_lost_id != 0 {
+		ctx.focus_lost_id = 0
+	}
 
 	// discard old elements
 
@@ -275,9 +284,9 @@ mouse_up :: #force_inline proc(ctx: ^Context) -> bool {
 
 // adjust the ctx.focus_id to the wanted id and keep track of click counting
 set_focus :: proc(ctx: ^Context, id: Id) {
-	// if id == 0 && ctx.focus_id != 0 {
-	// 	ctx.focus_lost_id = ctx.focus_id
-	// }
+	if id == 0 && ctx.focus_id != 0 {
+		ctx.focus_lost_id = ctx.focus_id
+	}
 
 	ctx.focus_id = id
 
@@ -302,13 +311,14 @@ set_focus :: proc(ctx: ^Context, id: Id) {
 @(private)
 element_should_be_ignored :: proc(element: ^Element) -> bool {
 	p := element
-	// for p != nil {
-	// 	if .Ignore in p.flags {
-	// 		return true
-	// 	}
-	// 	p = p.parent
-	// }
-	// return false
+
+	for p != nil {
+		if .Ignore_Self_And_Descendants in p.flags {
+			return true
+		}
+		p = p.parent
+	}
+
 	return .Ignore_Self in p.flags
 }
 

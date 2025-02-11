@@ -1,5 +1,6 @@
 package qwe
 
+import "core:log"
 import "core:math"
 
 button_interaction :: proc(ctx: ^Context, element: ^Element) -> bool {
@@ -19,14 +20,13 @@ was_focused :: proc(ctx: ^Context, element: ^Element) -> bool {
 	return ctx.focus_lost_id == element.id
 }
 
-scrollbar_final :: proc(element: ^Element) -> int {
-	final := element.layout.b - element.layout.t
-	return final + element.cut_gap
+scrollbar_maximum_page_diff :: proc(element: ^Element) -> int {
+	maximum := element.inf.b - element.inf.t
+	page := element.bounds.b - element.bounds.t
+	return maximum - page
 }
 
 scrollbar_interaction :: proc(ctx: ^Context, parent, element: ^Element) {
-	final := scrollbar_final(parent)
-
 	if ctx.focus_id == element.id && ctx.mouse_down == {.Left} {
 		parent.scroll.y += ctx.mouse_delta.y
 	}
@@ -35,7 +35,9 @@ scrollbar_interaction :: proc(ctx: ^Context, parent, element: ^Element) {
 		parent.scroll.y += ctx.scroll_delta.y
 	}
 
-	parent.scroll.y = clamp(parent.scroll.y, 0, max(-final, 0))
+	diff := scrollbar_maximum_page_diff(parent)
+	orig := parent.scroll.y
+	parent.scroll.y = clamp(parent.scroll.y, 0, max(diff, 0))
 }
 
 slider_interaction :: proc(

@@ -1,5 +1,7 @@
 package qwe
 
+RECT_INF :: Rect { max(int), -max(int), max(int), -max(int) }
+
 Rect :: struct {
 	l, r, t, b: int,
 }
@@ -87,4 +89,12 @@ rect_margin :: proc(a: Rect, value: int) -> Rect {
 
 rect_intersection :: proc(a: Rect, b: Rect) -> Rect {
 	return {l = max(a.l, b.l), r = min(a.r, b.r), t = max(a.t, b.t), b = min(a.b, b.b)}
+}
+
+// push the rect to sum with the existing rect
+rect_inf_push :: proc(rect: ^Rect, other: Rect) {
+	rect.l = min(rect.l, other.l)
+	rect.r = max(rect.r, other.r)
+	rect.t = min(rect.t, other.t)
+	rect.b = max(rect.b, other.b)
 }

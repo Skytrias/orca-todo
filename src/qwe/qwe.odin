@@ -74,6 +74,7 @@ Element :: struct {
 	clipped:            Rect, // TODO
 	layout_start:       Rect,
 	layout:             Rect, // temp bounds rect used for layouting
+	inf:                Rect,
 
 	// cut info
 	cut_direction:      Cut_Direction,
@@ -219,6 +220,7 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 	res.flags = flags
 	res.bounds = ctx.next.bounds
 	res.clipped = ctx.next.bounds
+	res.inf = RECT_INF
 
 	// get last parent
 	if len(ctx.parent_stack) > 0 {
@@ -416,6 +418,14 @@ element_text_yalign :: proc(ctx: ^Context, align: Text_Align) {
 element_set_bounds :: proc(ctx: ^Context, to: Rect) {
 	ctx.next.bounds = to
 	ctx.next.cut_direction = .None
+
+	if len(ctx.parent_stack) > 0 {
+		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
+		ctx.next.bounds.t -= parent.scroll.y
+		ctx.next.bounds.b -= parent.scroll.y
+		ctx.next.bounds.l -= parent.scroll.x
+		ctx.next.bounds.r -= parent.scroll.x
+	}
 }
 
 element_set_bounds_relative :: proc(ctx: ^Context, to: Rect) {
@@ -426,6 +436,14 @@ element_set_bounds_relative :: proc(ctx: ^Context, to: Rect) {
 	ctx.next.bounds.r = ctx.next.bounds.l + (to.r - to.l)
 	ctx.next.bounds.t += to.t
 	ctx.next.bounds.b = ctx.next.bounds.t + (to.b - to.t)
+
+	if len(ctx.parent_stack) > 0 {
+		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
+		ctx.next.bounds.t -= parent.scroll.y
+		ctx.next.bounds.b -= parent.scroll.y
+		ctx.next.bounds.l -= parent.scroll.x
+		ctx.next.bounds.r -= parent.scroll.x
+	}
 }
 
 @(private)
@@ -440,6 +458,12 @@ element_cut_typed :: proc(ctx: ^Context, element: ^Element) {
 	if len(ctx.parent_stack) == 0 || element.cut_direction == .None {
 		element.layout = rect_margin(element.bounds, element.cut_margin)
 		element.layout_start = element.layout
+
+		if len(ctx.parent_stack) > 0 {
+			parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
+			rect_inf_push(&parent.inf, element.bounds) // push raw rect to inf
+		}
+
 		return
 	}
 
@@ -480,6 +504,7 @@ element_cut_typed :: proc(ctx: ^Context, element: ^Element) {
 	}
 
 	element.clipped = rect_intersection(parent.layout_start, element.bounds)
+	rect_inf_push(&parent.inf, element.bounds) // push raw rect to inf
 
 	if .Is_Parent in element.flags {
 		element.layout = rect_margin(element.bounds, element.cut_margin)

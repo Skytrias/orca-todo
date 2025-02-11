@@ -54,20 +54,40 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 		label_underlined(ui, write, .Center, write_alpha)
 	}
 
-	CELLX_SIZE :: 150
-	CELLY_SIZE :: 150
+	editor_render_tasks(editor)
+}
+
+editor_render_tasks :: proc(editor: ^Editor) {
+	ui := editor.ui
+
+	qwe.element_margin(ui, 0)
+	qwe.element_fill(ui)
+	panel_begin(ui, "tasks all", {})
+	defer panel_end(ui)
+
+	offset := editor.camera.offset
+	offset.x = f32(int(offset.x))
+	offset.y = f32(int(offset.y))
+	zoom_small := editor.camera.zoom
+	zoom_small = max(zoom_small, 0.1)
+	editor.font_size *= zoom_small
+	editor.font_size = f32(int(editor.font_size))
+	oc.set_font_size(editor.font_size)
+
+	cellx_size := int(150 * zoom_small)
+	celly_size := int(150 * zoom_small)
 	for y in 0 ..< len(editor.tags) + 1 {
-		yy := (y + 1) * CELLY_SIZE
-		oc.move_to(CELLX_SIZE, f32(yy))
-		oc.line_to(f32(CELLX_SIZE + CELLX_SIZE * len(editor.states)), f32(yy))
+		yy := (y + 1) * celly_size
+		oc.move_to(f32(cellx_size) + offset.x, f32(yy) + offset.y)
+		oc.line_to(f32(cellx_size + cellx_size * len(editor.states)) + offset.x, f32(yy) + offset.y)
 		oc.set_width(2)
 		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
 		oc.stroke()
 	}
 	for x in 0 ..< len(editor.states) + 1 {
-		xx := (x + 1) * CELLX_SIZE
-		oc.move_to(f32(xx), CELLY_SIZE)
-		oc.line_to(f32(xx), f32(CELLY_SIZE + CELLY_SIZE * len(editor.tags)))
+		xx := (x + 1) * cellx_size
+		oc.move_to(f32(xx) + offset.x, f32(celly_size) + offset.y)
+		oc.line_to(f32(xx) + offset.x, f32(celly_size + celly_size * len(editor.tags)) + offset.y)
 		oc.set_width(2)
 		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
 		oc.stroke()
@@ -78,22 +98,26 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 	cell_index: int
 	editor.task_hovering = false
 	drag_end := !editor.task_dragging && editor.task_drag != {}
+
+	task_step_count := 5
+	task_size := int(cellx_size / task_step_count)
+
 	// tags
 	for tag, y in editor.tags {
-		xx := 0
-		yy := (y + 1) * CELLY_SIZE
-		to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
-		qwe.element_set_bounds_relative(ui, to)
+		xx := int(offset.x)
+		yy := int(offset.y) + (y + 1) * celly_size
+		to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
+		qwe.element_set_bounds(ui, to)
 		qwe.element_text_align(ui, .End, .Center)
 		label_highlight(ui, tag.description, editor.write_hover.y == tag.id)
 
 		// states
 		for state, x in editor.states {
 			if y == 0 {
-				xx := (x + 1) * CELLX_SIZE
-				yy := 0
-				to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
-				qwe.element_set_bounds_relative(ui, to)
+				xx := int(offset.x) + (x + 1) * cellx_size
+				yy := int(offset.y)
+				to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
+				qwe.element_set_bounds(ui, to)
 				qwe.element_text_align(ui, .Center, .End)
 				label_highlight(ui, state.description, editor.write_hover.x == state.id)
 			}
@@ -101,10 +125,10 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 			tasks_find_match_ids(&task_matches, editor.tasks[:], state.id, tag.id)
 
 			// cell
-			xx := (x + 1) * CELLX_SIZE
-			yy := (y + 1) * CELLY_SIZE
-			to := qwe.Rect{xx, xx + CELLX_SIZE, yy, yy + CELLY_SIZE}
-			qwe.element_set_bounds_relative(ui, to)
+			xx := int(offset.x) + (x + 1) * cellx_size
+			yy := int(offset.y) + (y + 1) * celly_size
+			to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
+			qwe.element_set_bounds(ui, to)
 			text_display := fmt.tprintf("%d", len(task_matches))
 			text_hash := fmt.tprintf("%d", cell_index)
 			qwe.element_text_align(ui, .Center, .Center)
@@ -119,13 +143,16 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 					if task != nil {
 						task.state = state.id
 						task.tag = tag.id
+						editor.task_drag = {}
 					}
 				}
 			}
 
+			defer {
+				vscrollbar(ui, "testscroll")
+			}
+
 			// draw tasks
-			task_step_count := 10
-			task_size := CELLX_SIZE / task_step_count
 			task_x: int
 			task_y: int
 			for task, task_index in task_matches {
@@ -158,6 +185,10 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 	}
 
 	if drag_end {
+		if editor.task_drag != {} {
+			task := tasks_find_match_id(editor.tasks[:], editor.task_drag)
+			editor_task_remove(editor, task)
+		}
 		editor.task_drag = {}
 	}
 
@@ -165,7 +196,22 @@ editor_render :: proc(editor: ^Editor, scratch: oc.arena_scope) {
 		editor.write_hover = {}
 	}
 
+	if editor.task_dragging {
+		task := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
+		if task != nil {
+			to := qwe.Rect {
+				ui.mouse_position.x - task_size / 2,
+				ui.mouse_position.x + task_size / 2,
+				ui.mouse_position.y - task_size / 2,
+				ui.mouse_position.y + task_size / 2,
+			}
+			qwe.element_set_bounds(ui, to)
+			task_small_drag(ui, string(task.id[:]), "taskhover")
+		}
+	}
+
 	if editor.task_hover_unit > 0 {
+		editor_font_size_reset(editor)
 		width := 300
 		height := 50
 		yoffset := 10

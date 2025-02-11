@@ -92,6 +92,8 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 		}
 	}
 
+	mods := oc.key_mods(&editor.input)
+
 	#partial switch event.type {
 	case .KEYBOARD_KEY:
 		// log.info("EV", event.key.keyCode, event.key.mods)
@@ -154,7 +156,11 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 		qwe.input_mouse_move(ed.ui, int(event.mouse.x), int(event.mouse.y))
 
 	case .MOUSE_WHEEL:
-		qwe.input_scroll(ed.ui, int(event.mouse.deltaX), int(event.mouse.deltaY))
+		if .CMD in mods || .MAIN_MODIFIER in mods {
+			camera_zoom_at(editor, &editor.camera, event.mouse.deltaY / 10)
+		} else {
+			qwe.input_scroll(ed.ui, int(event.mouse.deltaX), int(event.mouse.deltaY))
+		}
 
 	case .MOUSE_BUTTON:
 		down := event.key.action == .PRESS
@@ -162,15 +168,22 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 		if down {
 			if event.key.button == .LEFT {
 				qwe.input_mouse_down(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Left)
+
+				if .CMD in mods || .MAIN_MODIFIER in mods {
+					editor.camera.dragging = true
+					editor.camera.drag_start = editor.input.mouse.pos
+				}
 			} else if event.key.button == .RIGHT {
 				qwe.input_mouse_down(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Right)
 			}
 		} else {
 			if event.key.button == .LEFT {
 				qwe.input_mouse_up(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Left)
+				editor.camera.dragging = false
 			} else if event.key.button == .RIGHT {
 				qwe.input_mouse_up(ed.ui, ed.ui.mouse_position.x, ed.ui.mouse_position.y, .Right)
 			}
 		}
 	}
+
 }

@@ -24,6 +24,13 @@ Task_Hovered :: struct {
 	current:   f32,
 }
 
+Camera :: struct {
+	zoom:       f32,
+	offset:     [2]f32,
+	dragging:   bool,
+	drag_start: [2]f32,
+}
+
 Editor :: struct {
 	surface:             oc.surface,
 	renderer:            oc.canvas_renderer,
@@ -41,11 +48,12 @@ Editor :: struct {
 	write:               strings.Builder,
 	write_time:          f32,
 	write_hover:         [2]uuid.Guid,
+	camera:              Camera,
 
 	// task states
 	tasks:               [dynamic]Task,
-	states:              [dynamic]Task_Header,
-	tags:                [dynamic]Task_Header,
+	states:              [dynamic]Task_Header, // TODO could be a map instead?
+	tags:                [dynamic]Task_Header, // TODO could be a map instead?
 
 	// log state
 	logger:              log.Logger,
@@ -110,6 +118,7 @@ editor_init :: proc(editor: ^Editor) {
 	editor.renderer = oc.canvas_renderer_create()
 	editor.surface = oc.canvas_surface_create(editor.renderer)
 	editor.canvas = oc.canvas_context_create()
+	editor.camera.zoom = 1
 
 	editor.window_size = {1200, 800}
 	oc.window_set_title("orca todo")
@@ -155,7 +164,7 @@ editor_init :: proc(editor: ^Editor) {
 
 	editor.theme = {
 		text1                  = {0, 0, 0.1, 1},
-		text2                  = {0, 0, 0.9, 1},
+		text2                  = {0, 0, 0.7, 1},
 		text_edit              = {10, 1, 0.5, 1},
 		border                 = {0, 0, 0.95, 1},
 		border_highlight       = {0, 0.9, 0.50, 1},
@@ -196,8 +205,21 @@ editor_destroy :: proc(editor: ^Editor) {
 	delete(editor.tasks)
 }
 
+editor_font_size_reset :: proc(editor: ^Editor) {
+	editor.font_size = 20
+	oc.set_font_size(editor.font_size)
+}
+
 editor_update_start :: proc(editor: ^Editor) {
+	editor_font_size_reset(editor)
 	qwe.animate_unit(&editor.task_hover_unit, 0.02, editor.task_hovering)
+
+	if editor.camera.dragging {
+		diff := editor.input.mouse.pos - editor.camera.drag_start
+		// log.info("DRAGGING", diff)
+		editor.camera.offset += diff
+		editor.camera.drag_start = editor.input.mouse.pos
+	}
 }
 
 editor_update_end :: proc(editor: ^Editor) {
@@ -216,10 +238,10 @@ Task_Inner_Group :: struct {
 }
 
 editor_save_builder :: proc(editor: ^Editor, builder: ^strings.Builder) {
-	// full := make(map[string]map[string]Task_Inner_Group, 32)
+	// full := make(map[uuid.Guid]map[uuid.Guid]Task_Inner_Group, 32)
 	// for task in editor.tasks {
 	// 	if task.tag not_in full {
-	// 		full[task.tag] = make(map[string]Task_Inner_Group, 32)
+	// 		full[task.tag] = make(map[uuid.Guid]Task_Inner_Group, 32)
 	// 	}
 
 	// 	mapping := &full[task.tag]
@@ -234,21 +256,30 @@ editor_save_builder :: proc(editor: ^Editor, builder: ^strings.Builder) {
 
 	// tag_count: int
 
-	// for tag_key, tag_value in full {
+	// for tag_id, tag_value in full {
+	// 	tag := task_header_find_id(editor.tags[:], tag_id)
+	// 	if tag == nil {
+	// 		continue
+	// 	}
+
 	// 	if tag_count > 0 {
 	// 		strings.write_byte(builder, '\n')
 	// 	}
 	// 	tag_count += 1
 	// 	strings.write_string(builder, "# ")
-	// 	strings.write_string(builder, tag_key)
+	// 	strings.write_string(builder, tag.description)
 	// 	strings.write_byte(builder, '\n')
 
-	// 	for state_key, state_value in tag_value {
+	// 	for state_id, state_value in tag_value {
 	// 		for i in 0 ..< state_value.content_index {
+	// 			state := task_header_find_id(editor.states[:], state_id)
+	// 			if state == nil {
+	// 				continue
+	// 			}
 	// 			strings.write_byte(builder, '-')
 	// 			strings.write_byte(builder, ' ')
 	// 			strings.write_string(builder, "***")
-	// 			strings.write_string(builder, state_key)
+	// 			strings.write_string(builder, state.description)
 	// 			strings.write_string(builder, "***")
 	// 			strings.write_byte(builder, ' ')
 	// 			strings.write_string(builder, state_value.content[i])
@@ -301,8 +332,24 @@ editor_save :: proc(editor: ^Editor) {
 	oc.file_close(file)
 }
 
+editor_clear_clones :: proc(editor: ^Editor) {
+	for task in editor.tasks {
+		delete(task.content)
+	}
+	for tag in editor.tags {
+		delete(tag.description)
+	}
+	for state in editor.states {
+		delete(state.description)
+	}
+	clear(&editor.tasks)
+	clear(&editor.tags)
+	clear(&editor.states)
+}
+
 editor_load_from_string :: proc(editor: ^Editor, content: string) {
-	// clear(&editor.tasks)
+	editor_clear_clones(editor)
+	context.random_generator = runtime.default_random_generator(&editor.rng)
 
 	// // load the content into maps again
 	// iter := string(content)
@@ -316,10 +363,15 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 
 	// 	if start == '#' {
 	// 		temp_tag = line[2:]
+	// 		task_header_insert_or_get_description(&editor.tags, temp_tag)
 	// 	} else if start == '-' {
 	// 		head, mid, tail := strings.partition(line[2:], " ")
 	// 		head_trimmed := strings.trim(head, "*")
-	// 		append(&editor.tasks, task_make(tail, head_trimmed, temp_tag))
+
+	// 		tag := task_header_insert_or_get_description(&editor.tags, temp_tag)
+	// 		state := task_header_insert_or_get_description(&editor.states, head_trimmed)
+
+	// 		append(&editor.tasks, task_make(tail, state.id, tag.id))
 	// 	}
 	// }
 }
@@ -374,7 +426,7 @@ editor_load :: proc(editor: ^Editor) {
 }
 
 task_header_make :: proc(description: string) -> Task_Header {
-	return {description = description, id = uuid.gen()}
+	return {description = strings.clone(description), id = uuid.gen()}
 }
 
 editor_example :: proc(editor: ^Editor) {
@@ -406,6 +458,22 @@ editor_example :: proc(editor: ^Editor) {
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(&editor.tasks, task_make("Test7", backlog, plan1))
 }
 
 editor_task_remove :: proc(editor: ^Editor, task: ^Task) {
@@ -418,11 +486,9 @@ editor_task_remove :: proc(editor: ^Editor, task: ^Task) {
 	}
 }
 
-hash_hue :: proc(name1, name2: string, offset: u64) -> f32 {
-	seed1 := hash.fnv64a(transmute([]byte)name1)
-	seed2 := hash.fnv64a(transmute([]byte)name2)
-	// seed := hash.sdbm(transmute([]byte) name)
-	rand.reset(u64(seed1) + u64(seed2) + offset)
+hash_hue :: proc(text: string) -> f32 {
+	seed := hash.fnv64a(transmute([]byte)text)
+	rand.reset(u64(seed))
 	return f32(rand.float64() * 360)
 }
 
@@ -458,7 +524,7 @@ editor_escape :: proc(editor: ^Editor) {
 }
 
 task_make :: proc(content: string, state, tag: uuid.Guid) -> Task {
-	return {content = content, state = state, tag = tag, id = uuid.gen()}
+	return {content = strings.clone(content), state = state, tag = tag, id = uuid.gen()}
 }
 
 editor_write_reset :: proc(editor: ^Editor) {
@@ -484,8 +550,8 @@ editor_insert_task :: proc(editor: ^Editor) -> bool {
 	tag := editor.tags[0].id
 
 	if editor.write_hover != {} {
-		state_header := task_header_find(editor.states[:], editor.write_hover.x)
-		tag_header := task_header_find(editor.tags[:], editor.write_hover.y)
+		state_header := task_header_find_id(editor.states[:], editor.write_hover.x)
+		tag_header := task_header_find_id(editor.tags[:], editor.write_hover.y)
 
 		if state_header != nil && tag_header != nil {
 			state = state_header.id
@@ -499,7 +565,7 @@ editor_insert_task :: proc(editor: ^Editor) -> bool {
 	return true
 }
 
-task_header_find :: proc(headers: []Task_Header, id: uuid.Guid) -> ^Task_Header {
+task_header_find_id :: proc(headers: []Task_Header, id: uuid.Guid) -> ^Task_Header {
 	for &header in headers {
 		if header.id == id {
 			return &header
@@ -507,4 +573,32 @@ task_header_find :: proc(headers: []Task_Header, id: uuid.Guid) -> ^Task_Header 
 	}
 
 	return nil
+}
+
+task_header_insert_or_get_description :: proc(
+	headers: ^[dynamic]Task_Header,
+	description: string,
+) -> ^Task_Header {
+	for &header in headers {
+		if header.description == description {
+			return &header
+		}
+	}
+
+	head := task_header_make(description)
+	append(headers, head)
+	return &headers[len(headers) - 1]
+}
+
+camera_zoom_at :: proc(editor: ^Editor, cam: ^Camera, zoom_factor: f32) {
+	mouse := editor.input.mouse.pos
+
+	mouse_world := [2]f32{(mouse.x - cam.offset.x) / cam.zoom, (mouse.y - cam.offset.y) / cam.zoom}
+
+	// Apply the zoom change
+	cam.zoom = max(cam.zoom - zoom_factor, 0.1)
+
+	// Recalculate offset to keep the zoom centered at the mouse position
+	cam.offset.x = mouse.x - mouse_world.x * cam.zoom
+	cam.offset.y = mouse.y - mouse_world.y * cam.zoom
 }

@@ -331,16 +331,16 @@ vscrollbar :: proc(ctx: ^qwe.Context, name: string) {
 	qwe.element_set_bounds(ctx, to)
 	element := qwe.element_make(ctx, name, {})
 
-	full := parent.bounds.b - parent.bounds.t
-	height := parent.layout.b - parent.layout.t + parent.cut_gap
-	unit := f32(parent.scroll.y) / f32(max(-height, 1))
+	full := parent.inf.b - parent.inf.t
+	diff := qwe.scrollbar_maximum_page_diff(parent)
+	// unit := f32(parent.scroll.y) / f32(max(-diff, 1))
 
-	if height < 0 {
+	if diff > 0 {
 		// gradient fun
 		top := to
-		top.b = to.t + int(unit * f32(full))
+		top.b = to.t + int(parent.scroll.y)
 		bottom := to
-		bottom.t = to.t + int(unit * f32(full))
+		bottom.t = to.t + int(parent.scroll.y)
 		// alpha := f32(0.75)
 		alpha := 0.75 * parent.hover_children
 		grad1 := oc.color_srgba(1, 1, 1, alpha)
@@ -373,15 +373,11 @@ task_panel_begin :: proc(ctx: ^qwe.Context, text_hash: string) -> ^qwe.Element {
 
 task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 	element := ctx.parent_stack[len(ctx.parent_stack) - 1]
-
-	range := ed.theme.button
+	range := ed.theme.border_highlight
 	range.a = 0.75
 	range.a *= element.hover_children
-	element_background(element.bounds, range, false)
-
-	// render
-	element_text(element.text_align, element.bounds, text_display, ed.theme.text1)
-
+	element_border(element.bounds, range, ed.theme.border_width, false)
+	element_text(element.text_align, element.bounds, text_display, ed.theme.text2)
 	panel_end(ctx)
 }
 
@@ -389,50 +385,21 @@ task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
 	element := qwe.element_make(ctx, string(task.id[:]), {})
 	inspector_add(element)
 
-	// render
-	element_background(element.bounds, {0, 0, 0.25, 1}, true)
-	return element
-}
-
-bstate_button :: proc(
-	ctx: ^qwe.Context,
-	text_left: string,
-	text_right: string,
-	text_hash: string,
-	state: bool,
-	is_tag: bool,
-) -> ^qwe.Element {
-	qwe.element_text_align(ctx, .Center, .Center)
-	element := qwe.element_make(ctx, text_hash, {})
-	inspector_add(element)
-
-	// render with my customized render calls
-	// color := ed.theme.bstate[state ? 1 : 0]
-	// color.z = min(color.z + element.hover * 0.1, 1)
-	color := task_filter_range(text_left, is_tag)
-	color_text := ed.theme.text1
-	if state {
-		color.z = 0.95
-		color.a = 0.5
-		color_text = 0.5
+	bounds := qwe.rect_margin(element.bounds, 1)
+	hue := hash_hue(element.text_label)
+	element_background(bounds, {hue, 0.65, 0.75, 1}, false)
+	if ed.task_drag == task.id {
+		element_border(bounds, ed.theme.border_highlight, ed.theme.border_width * 2, false)
 	}
-	color.z = min(color.z - element.hover * 0.1, 1)
-
-	color_set(color)
-	rect_fill_hovered(element.bounds, element.hover * -2)
-	element_text({.Start, .Center}, element.bounds, text_left, color_text)
-	element_text({.End, .Center}, element.bounds, text_right, color_text)
-
 	return element
 }
 
-matrix3_scale :: proc(sx, sy: f32) -> oc.mat2x3 {
-	return {sx, 0, 0, 0, sy, 0}
-}
-
-// Helper function to create an identity oc.mat2x3
-matrix3_identity :: proc() -> oc.mat2x3 {
-	return {1, 0, 0, 0, 1, 0}
+task_small_drag :: proc(ctx: ^qwe.Context, task_label: string, text: string) -> ^qwe.Element {
+	element := qwe.element_make(ctx, text, {.Ignore_Self})
+	inspector_add(element)
+	hue := hash_hue(task_label)
+	element_background(qwe.rect_margin(element.bounds, 1), {hue, 0.65, 0.75, 0.75}, false)
+	return element
 }
 
 rect_fill_hovered :: proc(bounds: qwe.Rect, hover: f32) {
@@ -442,48 +409,6 @@ rect_fill_hovered :: proc(bounds: qwe.Rect, hover: f32) {
 	w += hover * 2
 	h += hover * 2
 	oc.rectangle_fill(x, y, w, h)
-}
-
-element_rotated_matrix :: proc(bounds: qwe.Rect, hover: f32) {
-	x, y, w, h := qwe.rect_flat(bounds)
-	w = w + hover * 10
-	h = h + hover * 10
-
-	// Translate to position
-	translate := oc.mat2x3_translate(x, y)
-
-	// Scale
-	scale := oc.mat2x3{w, 0, 0, 0, h, 0}
-
-	// Rotate around center
-	center_x, center_y := w / 2, h / 2
-	to_center := oc.mat2x3_translate(-center_x, -center_y)
-	rotate := oc.mat2x3_rotate(hover * 0.1) // Adjust factor as needed
-	from_center := oc.mat2x3_translate(center_x, center_y)
-
-	// Combine transformations
-	transform := oc.mat2x3_mul_m(
-		translate,
-		oc.mat2x3_mul_m(from_center, oc.mat2x3_mul_m(rotate, oc.mat2x3_mul_m(to_center, scale))),
-	)
-
-	oc.matrix_multiply_push(transform)
-}
-
-task_filter_range :: proc(text: string, is_tag: bool) -> [4]f32 {
-	hue := hash_hue(text, is_tag ? "tagging" : "stating", is_tag ? 2342341 : 0)
-	return {hue, 0.65, 0.85, 1}
-}
-
-task_sub_label :: proc(ctx: ^qwe.Context, text: string, is_tag: bool) {
-	qwe.element_text_xalign(ctx, .Center)
-	element := qwe.element_make(ctx, text, {.Ignore_Self})
-	inspector_add(element)
-
-	element_background(element.bounds, task_filter_range(text, is_tag), false)
-
-	// render
-	// element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
 }
 
 hover_button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags = {}) -> bool {

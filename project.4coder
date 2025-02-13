@@ -1,0 +1,42 @@
+version(2);
+project_name = "Orca";
+
+session_file = ".session.4coder";
+virtual_whitespace_regular_indent=2;
+
+patterns = {
+  "*.c",
+  "*.cpp",
+  "*.h",
+  "*.hpp",
+  "*.m",
+  "*.mm",
+  "*.bat",
+  "*.sh",
+  "*.4coder",
+  "*.txt",
+  "*.odin",
+  "*.md",
+};
+
+blacklist_patterns = { ".*", };
+
+paths = {
+  { .path = ".", .recursive = true, .relative = true, },
+};
+
+load_paths = {
+  .win   = paths,
+  .linux = paths,
+  .mac   = paths,
+};
+
+commands = {
+  .run      = { .mac = "make run", .out = "*compilation*", .footer_panel=true, .save_dirty_files=true,  .cursor_at_end=true  },
+  .build    = { .mac = "make build",    .out = "*compilation*", .footer_panel=true, .save_dirty_files=true,  .cursor_at_end=true,  },
+};
+
+fkey_command = {
+  .F1 = "build",
+  .F2 = "run",
+};

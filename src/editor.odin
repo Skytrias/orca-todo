@@ -2,6 +2,7 @@ package src
 
 import "base:intrinsics"
 import "base:runtime"
+import "core:encoding/csv"
 import "core:fmt"
 import "core:hash"
 import "core:log"
@@ -17,6 +18,7 @@ import "qwe"
 import "uuid"
 
 MATERIAL_ICONS :: oc.unicode_range{0xE000, 3000}
+TASK_EMPTY :: "(empty)"
 
 Task_Hovered :: struct {
 	text:      string,
@@ -31,6 +33,12 @@ Camera :: struct {
 	drag_start: [2]f32,
 }
 
+Write_Mode :: enum {
+	Task,
+	State,
+	Tag,
+}
+
 Editor :: struct {
 	surface:             oc.surface,
 	renderer:            oc.canvas_renderer,
@@ -40,25 +48,25 @@ Editor :: struct {
 	window_size:         oc.vec2,
 	mouse_position:      oc.vec2,
 	font_size:           f32,
-	file_filters:        oc.str8_list,
-	file_arena:          oc.arena,
 	input:               oc.input_state,
 
 	// interactions
 	write:               strings.Builder,
 	write_time:          f32,
 	write_hover:         [2]uuid.Guid,
+	write_mode:          Write_Mode,
 	camera:              Camera,
 
 	// task states
 	tasks:               [dynamic]Task,
-	states:              [dynamic]Task_Header, // TODO could be a map instead?
-	tags:                [dynamic]Task_Header, // TODO could be a map instead?
+	states:              [dynamic]Header,
+	tags:                [dynamic]Header,
 
 	// log state
 	logger:              log.Logger,
 	ui:                  ^qwe.Context,
 	theme:               Theme,
+	theme_white:         bool,
 
 	// task hovering
 	task_hovered:        uuid.Guid, // sticks around unless deleted
@@ -74,7 +82,7 @@ Editor :: struct {
 	rng:                 rand.Default_Random_State,
 }
 
-Task_Header :: struct {
+Header :: struct {
 	id:          uuid.Guid,
 	description: string,
 }
@@ -94,18 +102,12 @@ Task :: struct {
 Theme :: struct {
 	text1:                  [4]f32,
 	text2:                  [4]f32,
-	text_edit:              [4]f32,
 	border:                 [4]f32,
 	border_highlight:       [4]f32,
-	panel:                  [4]f32,
-	overlay:                [4]f32,
+	panel1:                 [4]f32,
+	panel2:                 [4]f32,
 	button:                 [4]f32,
 	base:                   [4]f32,
-	scroll_base:            [4]f32,
-	scroll_thumb:           [4]f32,
-
-	// filter
-	bstate:                 [2][4]f32,
 
 	// styling
 	border_radius:          f32,
@@ -121,7 +123,7 @@ editor_init :: proc(editor: ^Editor) {
 	editor.camera.zoom = 1
 
 	editor.window_size = {1200, 800}
-	oc.window_set_title("orca todo")
+	oc.window_set_title("todo grid")
 	oc.window_set_size(editor.window_size)
 
 	editor.font_size = 20
@@ -151,6 +153,8 @@ editor_init :: proc(editor: ^Editor) {
 	// editor.font_icons = oc.font_create_from_path("icofont.ttf", u32(len(ranges_material)), &ranges_material[0])
 
 	editor.tasks = make([dynamic]Task, 0, 128)
+	editor.tags = make([dynamic]Header, 0, 32)
+	editor.states = make([dynamic]Header, 0, 32)
 
 	editor.logger = oc.create_odin_logger()
 	context.logger = editor.logger
@@ -159,50 +163,54 @@ editor_init :: proc(editor: ^Editor) {
 	context.random_generator = runtime.default_random_generator(&editor.rng)
 
 	log.info("Startup done")
-	oc.arena_init(&editor.file_arena)
-	oc.str8_list_push(&editor.file_arena, &editor.file_filters, "md")
-
-	editor.theme = {
-		text1                  = {0, 0, 0.1, 1},
-		text2                  = {0, 0, 0.7, 1},
-		text_edit              = {10, 1, 0.5, 1},
-		border                 = {0, 0, 0.95, 1},
-		border_highlight       = {0, 0.9, 0.50, 1},
-		overlay                = {0, 0, 0.1, 0.95},
-		panel                  = {0, 0, 1.0, 1},
-		button                 = {0, 0, 0.8, 1},
-		base                   = {0, 0, 0.7, 1},
-		scroll_base            = {0, 0, 0.3, 1},
-		scroll_thumb           = {0, 0, 0.5, 1},
-		bstate                 = {{0, 0.5, 0.5, 1}, {40, 0.5, 0.5, 1}},
-		border_radius          = 5,
-		border_width           = 2,
-		border_highlight_width = 4,
-		text_margin            = {10, 5},
-	}
-
-	// editor.theme = {
-	// 	text                   = {0, 0, 0.0, 1},
-	// 	border                 = {0, 0, 0.20, 1},
-	// 	border_highlight       = {0, 0.9, 0.50, 1},
-	// 	panel                  = {0, 0, 0.15, 1},
-	// 	button                 = {0, 0, 0.5, 1},
-	// 	base                   = {0, 0, 0.3, 1},
-	// 	scroll_base            = {0, 0, 0.3, 1},
-	// 	scroll_thumb           = {0, 0, 0.5, 1},
-	// 	bstate                 = {{0, 0.5, 0.5, 1}, {40, 0.5, 0.5, 1}},
-	// 	border_radius          = 5,
-	// 	border_width           = 2,
-	// 	border_highlight_width = 4,
-	// 	text_margin            = {10, 5},
-	// }
+	theme_set(editor, false)
 
 	editor.ui = new(qwe.Context)
 	qwe.init(editor.ui)
+
+	editor_state_insert(editor, "Backlog")
+	editor_tag_insert(editor, "Start")
+}
+
+theme_set :: proc(editor: ^Editor, white: bool) {
+	editor.theme_white = white
+	if white {
+		editor.theme = {
+			text1                  = {0, 0, 0.1, 1},
+			text2                  = {0, 0, 0.7, 1},
+			border                 = {0, 0, 0.95, 1},
+			border_highlight       = {125, 0.9, 0.60, 1},
+			panel1                 = {0, 0, 1.0, 1},
+			panel2                 = {0, 0, 1.0, 1},
+			button                 = {0, 0, 0.8, 1},
+			base                   = {0, 0, 0.7, 1},
+			border_radius          = 5,
+			border_width           = 2,
+			border_highlight_width = 5,
+			text_margin            = {5, 5},
+		}
+	} else {
+		editor.theme = {
+			text1                  = {0, 0, 0.95, 1},
+			text2                  = {0, 0, 0.6, 1},
+			border                 = {0, 0, 0.25, 1},
+			border_highlight       = {125, 0.9, 0.75, 1},
+			panel1                 = {0, 0, 0.05, 1},
+			panel2                 = {0, 0, 0.15, 1},
+			button                 = {0, 0, 0.2, 1},
+			base                   = {0, 0, 0.3, 1},
+			border_radius          = 5,
+			border_width           = 2,
+			border_highlight_width = 5,
+			text_margin            = {5, 5},
+		}
+	}
 }
 
 editor_destroy :: proc(editor: ^Editor) {
 	delete(editor.tasks)
+	delete(editor.states)
+	delete(editor.tags)
 }
 
 editor_font_size_reset :: proc(editor: ^Editor) {
@@ -216,7 +224,6 @@ editor_update_start :: proc(editor: ^Editor) {
 
 	if editor.camera.dragging {
 		diff := editor.input.mouse.pos - editor.camera.drag_start
-		// log.info("DRAGGING", diff)
 		editor.camera.offset += diff
 		editor.camera.drag_start = editor.input.mouse.pos
 	}
@@ -232,61 +239,28 @@ editor_update_end :: proc(editor: ^Editor) {
 	}
 }
 
-Task_Inner_Group :: struct {
-	content:       [255]string,
-	content_index: int,
-}
-
 editor_save_builder :: proc(editor: ^Editor, builder: ^strings.Builder) {
-	// full := make(map[uuid.Guid]map[uuid.Guid]Task_Inner_Group, 32)
-	// for task in editor.tasks {
-	// 	if task.tag not_in full {
-	// 		full[task.tag] = make(map[uuid.Guid]Task_Inner_Group, 32)
-	// 	}
+	stream := strings.to_writer(builder)
+	w: csv.Writer
+	csv.writer_init(&w, stream)
+	csv.write(&w, {"Tag", "State", "Task"})
 
-	// 	mapping := &full[task.tag]
-	// 	if task.state not_in mapping {
-	// 		mapping[task.state] = {}
-	// 	}
+	task_matches := make([dynamic]^Task, 0, 128, context.temp_allocator)
+	for tag in editor.tags {
+		for state in editor.states {
+			tag := header_find_id(editor.tags[:], tag.id)
+			state := header_find_id(editor.states[:], state.id)
 
-	// 	group := &mapping[task.state]
-	// 	group.content[group.content_index] = task.content
-	// 	group.content_index += 1
-	// }
+			tasks_find_match_ids(&task_matches, editor.tasks[:], state.id, tag.id)
+			for task in task_matches {
+				csv.write(&w, {tag.description, state.description, task.content})
+			}
 
-	// tag_count: int
-
-	// for tag_id, tag_value in full {
-	// 	tag := task_header_find_id(editor.tags[:], tag_id)
-	// 	if tag == nil {
-	// 		continue
-	// 	}
-
-	// 	if tag_count > 0 {
-	// 		strings.write_byte(builder, '\n')
-	// 	}
-	// 	tag_count += 1
-	// 	strings.write_string(builder, "# ")
-	// 	strings.write_string(builder, tag.description)
-	// 	strings.write_byte(builder, '\n')
-
-	// 	for state_id, state_value in tag_value {
-	// 		for i in 0 ..< state_value.content_index {
-	// 			state := task_header_find_id(editor.states[:], state_id)
-	// 			if state == nil {
-	// 				continue
-	// 			}
-	// 			strings.write_byte(builder, '-')
-	// 			strings.write_byte(builder, ' ')
-	// 			strings.write_string(builder, "***")
-	// 			strings.write_string(builder, state.description)
-	// 			strings.write_string(builder, "***")
-	// 			strings.write_byte(builder, ' ')
-	// 			strings.write_string(builder, state_value.content[i])
-	// 			strings.write_byte(builder, '\n')
-	// 		}
-	// 	}
-	// }
+			if len(task_matches) == 0 {
+				csv.write(&w, {tag.description, state.description, TASK_EMPTY})
+			}
+		}
+	}
 }
 
 editor_save_to :: proc(editor: ^Editor) {
@@ -322,7 +296,7 @@ editor_save :: proc(editor: ^Editor) {
 	log.info("Editor Saving...")
 	defer log.info("Editor Save Done")
 
-	file_path := "test.md"
+	file_path := "test.csv"
 	file := oc.file_open(file_path, {.WRITE}, {.TRUNCATE, .CREATE})
 
 	builder := strings.builder_make(0, mem.Kilobyte, context.temp_allocator)
@@ -351,29 +325,45 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 	editor_clear_clones(editor)
 	context.random_generator = runtime.default_random_generator(&editor.rng)
 
-	// // load the content into maps again
-	// iter := string(content)
-	// temp_tag: string
-	// for line in strings.split_lines_iterator(&iter) {
-	// 	if len(line) == 0 {
-	// 		continue
-	// 	}
+	r: csv.Reader
+	r.lazy_quotes = true
+	r.reuse_record = true
+	r.reuse_record_buffer = true
+	csv.reader_init_with_string(&r, content)
+	defer csv.reader_destroy(&r)
 
-	// 	start := line[0]
+	for records, i, err in csv.iterator_next(&r) {
+		if err != nil || i == 0 {
+			continue
+		}
 
-	// 	if start == '#' {
-	// 		temp_tag = line[2:]
-	// 		task_header_insert_or_get_description(&editor.tags, temp_tag)
-	// 	} else if start == '-' {
-	// 		head, mid, tail := strings.partition(line[2:], " ")
-	// 		head_trimmed := strings.trim(head, "*")
+		tag_description := records[0]
+		state_description := records[1]
+		task := records[2]
 
-	// 		tag := task_header_insert_or_get_description(&editor.tags, temp_tag)
-	// 		state := task_header_insert_or_get_description(&editor.states, head_trimmed)
+		tag := header_find_description(editor.tags[:], tag_description)
+		state := header_find_description(editor.states[:], state_description)
 
-	// 		append(&editor.tasks, task_make(tail, state.id, tag.id))
-	// 	}
-	// }
+		tag_id: uuid.Guid
+		if tag == nil {
+			tag_id = editor_tag_insert(editor, tag_description)
+		} else {
+			tag_id = tag.id
+		}
+
+		state_id: uuid.Guid
+		if state == nil {
+			state_id = editor_state_insert(editor, state_description)
+		} else {
+			state_id = state.id
+		}
+
+		if task == TASK_EMPTY {
+			continue
+		}
+
+		append(&editor.tasks, task_make(task, state_id, tag_id))
+	}
 }
 
 editor_load_from :: proc(editor: ^Editor) {
@@ -410,7 +400,7 @@ editor_load :: proc(editor: ^Editor) {
 	log.info("Editor Loading...")
 	defer log.info("Editor Load Done")
 
-	cmp := oc_open_cmp("test.md", {.READ}, {})
+	cmp := oc_open_cmp("test.csv", {.READ}, {})
 	if cmp.error != .OK {
 		log.error("Load err:", cmp)
 		return
@@ -425,26 +415,55 @@ editor_load :: proc(editor: ^Editor) {
 	editor_load_from_string(editor, string(content))
 }
 
-task_header_make :: proc(description: string) -> Task_Header {
-	return {description = strings.clone(description), id = uuid.gen()}
+header_find_id :: proc(headers: []Header, id: uuid.Guid) -> ^Header {
+	for &header in headers {
+		if header.id == id {
+			return &header
+		}
+	}
+
+	return nil
+}
+
+header_find_description :: proc(headers: []Header, description: string) -> ^Header {
+	for &header in headers {
+		if header.description == description {
+			return &header
+		}
+	}
+
+	return nil
+}
+
+editor_state_insert :: proc(editor: ^Editor, description: string) -> (id: uuid.Guid) {
+	id = uuid.gen()
+	append(&editor.states, Header{id = id, description = strings.clone(description)})
+	return
+}
+
+editor_tag_insert :: proc(editor: ^Editor, description: string) -> (id: uuid.Guid) {
+	id = uuid.gen()
+	append(&editor.tags, Header{id = id, description = strings.clone(description)})
+	return
+}
+
+task_make :: proc(content: string, state, tag: uuid.Guid) -> Task {
+	return {content = strings.clone(content), state = state, tag = tag, id = uuid.gen()}
 }
 
 editor_example :: proc(editor: ^Editor) {
-	clear(&editor.tasks)
+	editor_clear_clones(editor)
 	context.random_generator = runtime.default_random_generator(&editor.rng)
 
-	append(&editor.states, task_header_make("Backlog"))
-	append(&editor.states, task_header_make("WIP"))
-	append(&editor.states, task_header_make("Done"))
-	append(&editor.states, task_header_make("Dropped"))
+	backlog := editor_state_insert(editor, "Backlog")
+	editor_state_insert(editor, "WIP")
+	editor_state_insert(editor, "Done")
+	editor_state_insert(editor, "Dropped")
 
-	append(&editor.tags, task_header_make("Plan1"))
-	append(&editor.tags, task_header_make("Plan2"))
-	append(&editor.tags, task_header_make("Plan3"))
-	append(&editor.tags, task_header_make("Plan4"))
-
-	backlog := editor.states[0].id
-	plan1 := editor.tags[0].id
+	plan1 := editor_tag_insert(editor, "Plan1")
+	editor_tag_insert(editor, "Plan2")
+	editor_tag_insert(editor, "Plan3")
+	editor_tag_insert(editor, "Plan4")
 
 	append(&editor.tasks, task_make("Test1", backlog, plan1))
 	append(&editor.tasks, task_make("Test2", backlog, plan1))
@@ -523,10 +542,6 @@ editor_escape :: proc(editor: ^Editor) {
 	}
 }
 
-task_make :: proc(content: string, state, tag: uuid.Guid) -> Task {
-	return {content = strings.clone(content), state = state, tag = tag, id = uuid.gen()}
-}
-
 editor_write_reset :: proc(editor: ^Editor) {
 	strings.builder_reset(&editor.write)
 }
@@ -535,59 +550,41 @@ editor_write_time_unit :: proc(editor: ^Editor) -> f32 {
 	return abs(math.cos(editor.write_time))
 }
 
-editor_insert_task :: proc(editor: ^Editor) -> bool {
+editor_insert_task :: proc(editor: ^Editor) {
 	content := strings.trim_space(strings.to_string(editor.write))
 	if len(content) == 0 {
-		return false
-	}
-
-	if len(editor.states) == 0 || len(editor.tags) == 0 {
-		return false
-	}
-
-	// default
-	state := editor.states[0].id
-	tag := editor.tags[0].id
-
-	if editor.write_hover != {} {
-		state_header := task_header_find_id(editor.states[:], editor.write_hover.x)
-		tag_header := task_header_find_id(editor.tags[:], editor.write_hover.y)
-
-		if state_header != nil && tag_header != nil {
-			state = state_header.id
-			tag = tag_header.id
-		}
+		return
 	}
 
 	context.random_generator = runtime.default_random_generator(&editor.rng)
-	append(&editor.tasks, task_make(content, state, tag))
-	editor_write_reset(editor)
-	return true
-}
+	switch editor.write_mode {
+	case .State:
+		editor_state_insert(editor, content)
+		editor_write_reset(editor)
 
-task_header_find_id :: proc(headers: []Task_Header, id: uuid.Guid) -> ^Task_Header {
-	for &header in headers {
-		if header.id == id {
-			return &header
+	case .Tag:
+		editor_tag_insert(editor, content)
+		editor_write_reset(editor)
+
+	case .Task:
+		if len(editor.states) == 0 || len(editor.tags) == 0 {
+			return
+		}
+
+		if editor.write_hover == {} {
+			return
+		}
+
+		state := header_find_id(editor.states[:], editor.write_hover.x)
+		tag := header_find_id(editor.tags[:], editor.write_hover.y)
+
+		if state != nil && tag != nil {
+			state_id := editor.write_hover.x
+			tag_id := editor.write_hover.y
+			append(&editor.tasks, task_make(content, state_id, tag_id))
+			editor_write_reset(editor)
 		}
 	}
-
-	return nil
-}
-
-task_header_insert_or_get_description :: proc(
-	headers: ^[dynamic]Task_Header,
-	description: string,
-) -> ^Task_Header {
-	for &header in headers {
-		if header.description == description {
-			return &header
-		}
-	}
-
-	head := task_header_make(description)
-	append(headers, head)
-	return &headers[len(headers) - 1]
 }
 
 camera_zoom_at :: proc(editor: ^Editor, cam: ^Camera, zoom_factor: f32) {

@@ -11,7 +11,7 @@ ed: Editor
 main :: proc() {
 	editor_init(&ed)
 	editor_load(&ed)
-	editor_example(&ed)
+	// editor_example(&ed)
 }
 
 @(fini)
@@ -108,8 +108,7 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 
 		case .TAB:
 			if pressed {
-				// ed.show_theme = !ed.show_theme
-				// editor_tab_shift(editor)
+				theme_set(editor, !editor.theme_white)
 			}
 
 		case .BACKSPACE:

@@ -19,13 +19,6 @@ Panel_Flag :: enum {
 }
 Panel_Flags :: bit_set[Panel_Flag]
 
-inspector_add :: proc(element: ^qwe.Element) {
-
-}
-
-inspector_pop :: proc() {
-}
-
 @(private)
 clip_push_bounds :: proc(bounds: qwe.Rect) {
 	x, y, w, h := qwe.rect_flat(bounds)
@@ -39,7 +32,6 @@ panel_begin :: proc(
 	element_flags: qwe.Element_Flags = {},
 ) -> ^qwe.Element {
 	element := qwe.element_begin(ctx, name, element_flags)
-	inspector_add(element)
 
 	rounded := .Rounded in flags
 	if .Shadow in flags {
@@ -52,7 +44,7 @@ panel_begin :: proc(
 		// color := ed.theme.border_highlight
 		// color.z = color.z * element.hover_children
 		// color.a = color.a * element.hover_children
-		element_background(element.bounds, ed.theme.panel, rounded)
+		element_background(element.bounds, ed.theme.panel1, rounded)
 	}
 
 	if .Border_Left in flags {
@@ -93,7 +85,6 @@ panel_begin :: proc(
 
 panel_end :: proc(ctx: ^qwe.Context) {
 	qwe.element_end(ctx)
-	inspector_pop()
 	oc.clip_pop()
 }
 
@@ -104,14 +95,13 @@ panel_overlay_begin :: proc(
 	flags: qwe.Element_Flags = {},
 ) -> ^qwe.Element {
 	element := qwe.element_begin(ctx, name, flags)
-	inspector_add(element)
 
 	rounded := true
 	oc.set_color(oc.color_srgba(0, 0, 0, 0.5 * hover))
 	x, y, w, h := qwe.rect_flat(qwe.rect_margin(element.bounds, -5))
 	oc.rounded_rectangle_fill(x, y, w, h, 10)
 
-	panel_range := ed.theme.panel
+	panel_range := ed.theme.panel2
 	panel_range.a *= hover
 	element_background(element.bounds, panel_range, rounded)
 
@@ -124,18 +114,15 @@ panel_overlay_begin :: proc(
 spacer :: proc(ctx: ^qwe.Context, name: string, amount: int, direction: qwe.Cut_Direction) {
 	qwe.element_cut(ctx, direction, amount)
 	element := qwe.element_make(ctx, name, {})
-	inspector_add(element)
 }
 
 color_display :: proc(ctx: ^qwe.Context, name: string, range: [4]f32) {
 	element := qwe.element_make(ctx, name, {})
-	inspector_add(element)
 	element_background_and_border(element.bounds, range, ed.theme.border, true)
 }
 
 label_simple :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags = {}) {
 	element := qwe.element_make(ctx, text, flags)
-	inspector_add(element)
 
 	// render
 	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
@@ -143,7 +130,6 @@ label_simple :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags =
 
 label_alpha :: proc(ctx: ^qwe.Context, text: string, alpha: f32, flags: qwe.Element_Flags = {}) {
 	element := qwe.element_make(ctx, text, flags)
-	inspector_add(element)
 
 	// render
 	range := ed.theme.text1
@@ -157,7 +143,6 @@ label_hover :: proc(
 	flags: qwe.Element_Flags = {},
 ) -> ^qwe.Element {
 	element := qwe.element_make(ctx, text, flags)
-	inspector_add(element)
 
 	range := ed.theme.button
 	range.a *= element.hover
@@ -175,7 +160,6 @@ label_highlight :: proc(
 	flags: qwe.Element_Flags = {},
 ) {
 	element := qwe.element_make(ctx, text, flags)
-	inspector_add(element)
 	element.highlight_state = state
 
 	// render
@@ -183,7 +167,7 @@ label_highlight :: proc(
 	x, y := text_position(element.text_align, element.bounds, text_metrics)
 	text_color := color_blend(
 		color_get(ed.theme.text1),
-		oc.color_srgba(1, 0, 0, 1),
+		color_get(ed.theme.border_highlight),
 		element.highlight,
 	)
 	oc.set_color(text_color)
@@ -199,7 +183,6 @@ label_underlined :: proc(
 ) {
 	qwe.element_text_xalign(ctx, alignx)
 	element := qwe.element_make(ctx, text, flags)
-	inspector_add(element)
 
 	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, element.text_label)
 	x, y := text_position(element.text_align, element.bounds, text_metrics)
@@ -216,29 +199,6 @@ label_underlined :: proc(
 	oc.line_to(xoff + text_metrics.logical.w, yoff)
 	oc.stroke()
 }
-
-// inspector_header :: proc(ctx: ^qwe.Context, text: string, ins: Inspector_Element) {
-// 	qwe.element_text_xalign(ctx, .Start)
-// 	element := qwe.element_make(ctx, text, {.Ignore})
-
-// 	// render
-// 	color := ed.theme.base
-// 	color.z = min(color.z + ins.element.hover * 0.1, 1)
-// 	element_background(element.bounds, color)
-
-// 	bounds := element.bounds
-// 	bounds.l += ins.indent * 20
-// 	element_text(element, bounds, element.text_label, ed.theme.text)
-
-// 	clicked := qwe.button_interaction(ctx, element)
-// 	if clicked {
-// 		if element.id not_in ed.inspector.folds {
-// 			ed.inspector.folds[element.id] = true
-// 		} else {
-// 			ed.inspector.folds[element.id] = !ed.inspector.folds[element.id]
-// 		}
-// 	}
-// }
 
 button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags = {}) -> bool {
 	qwe.element_text_align(ctx, .Center, .Center)
@@ -263,7 +223,6 @@ slider :: proc(
 ) {
 	qwe.element_text_align(ctx, .Center, .Center)
 	element := qwe.element_make(ctx, text, {})
-	inspector_add(element)
 
 	// interaction
 	qwe.slider_interaction(ctx, element, value, low, high, step)
@@ -366,9 +325,15 @@ color_blend :: proc(a, b: oc.color, unit: f32) -> (res: oc.color) {
 
 task_panel_begin :: proc(ctx: ^qwe.Context, text_hash: string) -> ^qwe.Element {
 	element := qwe.element_begin(ctx, text_hash, {})
-	inspector_add(element)
 	clip_push_bounds(element.clipped)
 	return element
+}
+
+border_width_animate :: proc(element: ^qwe.Element) -> f32 {
+	return max(
+		ed.theme.border_width * (1 - element.hover_children),
+		ed.theme.border_highlight_width * (element.hover_children),
+	)
 }
 
 task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
@@ -376,14 +341,33 @@ task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 	range := ed.theme.border_highlight
 	range.a = 0.75
 	range.a *= element.hover_children
-	element_border(element.bounds, range, ed.theme.border_width, false)
-	element_text(element.text_align, element.bounds, text_display, ed.theme.text2)
+	border_width := border_width_animate(element)
+	element_border(element.bounds, range, border_width, false)
+
+	render := text_display
+	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, render)
+	x, y := text_position(element.text_align, element.bounds, text_metrics)
+	color_set(ed.theme.panel1)
+	oc.rounded_rectangle_fill(
+		x - ed.theme.text_margin.x,
+		y - text_metrics.ink.h - ed.theme.text_margin.y,
+		text_metrics.ink.w + ed.theme.text_margin.x * 2,
+		text_metrics.ink.h + ed.theme.text_margin.y * 2,
+		ed.theme.border_radius * 2,
+	)
+	text_color := color_blend(
+		color_get(ed.theme.text2),
+		color_get(ed.theme.border_highlight),
+		element.hover_children,
+	)
+	oc.set_color(text_color)
+	oc.text_fill(x, y, render)
+
 	panel_end(ctx)
 }
 
 task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
 	element := qwe.element_make(ctx, string(task.id[:]), {})
-	inspector_add(element)
 
 	bounds := qwe.rect_margin(element.bounds, 1)
 	hue := hash_hue(element.text_label)
@@ -396,7 +380,6 @@ task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
 
 task_small_drag :: proc(ctx: ^qwe.Context, task_label: string, text: string) -> ^qwe.Element {
 	element := qwe.element_make(ctx, text, {.Ignore_Self})
-	inspector_add(element)
 	hue := hash_hue(task_label)
 	element_background(qwe.rect_margin(element.bounds, 1), {hue, 0.65, 0.75, 0.75}, false)
 	return element
@@ -416,7 +399,7 @@ hover_button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags =
 	element := qwe.element_make(ctx, text, flags)
 
 	// render with my customized render calls
-	color := ed.theme.panel
+	color := ed.theme.panel2
 	color.z = min(color.z + element.hover * 0.1, 1)
 	color.a *= element.hover
 	element_background(element.bounds, color, false)
@@ -426,6 +409,17 @@ hover_button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags =
 
 	// interaction
 	return qwe.button_interaction(ctx, element)
+}
+
+label_hover_range :: proc(ctx: ^qwe.Context, text: string) -> ^qwe.Element {
+	element := qwe.element_make(ctx, text, {})
+	range := ed.theme.border_highlight
+	range.a = 0.75
+	range.a *= element.hover_children
+	border_width := border_width_animate(element)
+	element_border(element.bounds, range, border_width, false)
+	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text2)
+	return element
 }
 
 /////////////////////////////////////////////////////////////////////

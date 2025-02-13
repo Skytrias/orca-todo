@@ -62,7 +62,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 
 	qwe.element_margin(ui, 0)
 	qwe.element_fill(ui)
-	panel_begin(ui, "tasks all", {})
+	panel_begin(ui, "tasks all", {.Background})
 	defer panel_end(ui)
 
 	offset := editor.camera.offset
@@ -81,7 +81,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		oc.move_to(f32(cellx_size) + offset.x, f32(yy) + offset.y)
 		oc.line_to(f32(cellx_size + cellx_size * len(editor.states)) + offset.x, f32(yy) + offset.y)
 		oc.set_width(2)
-		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
+		color_set(editor.theme.border)
 		oc.stroke()
 	}
 	for x in 0 ..< len(editor.states) + 1 {
@@ -89,7 +89,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		oc.move_to(f32(xx) + offset.x, f32(celly_size) + offset.y)
 		oc.line_to(f32(xx) + offset.x, f32(celly_size + celly_size * len(editor.tags)) + offset.y)
 		oc.set_width(2)
-		oc.set_color(oc.color_rgba(0.5, 0.5, 0.5, 1))
+		color_set(editor.theme.border)
 		oc.stroke()
 	}
 
@@ -99,11 +99,13 @@ editor_render_tasks :: proc(editor: ^Editor) {
 	editor.task_hovering = false
 	drag_end := !editor.task_dragging && editor.task_drag != {}
 
-	task_step_count := 5
+	task_step_count := 4
 	task_size := int(cellx_size / task_step_count)
 
 	// tags
+	editor.write_mode = .Task
 	for tag, y in editor.tags {
+		tag := header_find_id(editor.tags[:], tag.id)
 		xx := int(offset.x)
 		yy := int(offset.y) + (y + 1) * celly_size
 		to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
@@ -113,6 +115,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 
 		// states
 		for state, x in editor.states {
+			state := header_find_id(editor.states[:], state.id)
 			if y == 0 {
 				xx := int(offset.x) + (x + 1) * cellx_size
 				yy := int(offset.y)
@@ -181,6 +184,44 @@ editor_render_tasks :: proc(editor: ^Editor) {
 			}
 
 			cell_index += 1
+		}
+	}
+
+	// tag add section
+	{
+		xx := int(offset.x)
+		width := len(editor.states) * cellx_size
+		if len(editor.states) > 0 {
+			xx += cellx_size
+		} else {
+			width += cellx_size
+		}
+		yy := int(offset.y) + (len(editor.tags) + 1) * celly_size
+		to := qwe.Rect{xx, xx + width, yy, yy + celly_size}
+		qwe.element_set_bounds(ui, to)
+		qwe.element_text_align(ui, .Center, .Center)
+		element := label_hover_range(ui, "tag")
+		if qwe.is_hovered(ui, element) {
+			editor.write_mode = .Tag
+		}
+	}
+
+	// state add section
+	{
+		yy := int(offset.y)
+		height := len(editor.tags) * celly_size
+		if len(editor.tags) > 0 {
+			yy += celly_size
+		} else {
+			height += celly_size
+		}
+		xx := int(offset.x) + (len(editor.states) + 1) * cellx_size
+		to := qwe.Rect{xx, xx + cellx_size, yy, yy + height}
+		qwe.element_set_bounds(ui, to)
+		qwe.element_text_align(ui, .Center, .Center)
+		element := label_hover_range(ui, "state")
+		if qwe.is_hovered(ui, element) {
+			editor.write_mode = .State
 		}
 	}
 

@@ -1,6 +1,6 @@
 .vscode
 output.app
-output.app/
+output.app/*
 .session.4coder
 project.4coder
 module.wasm

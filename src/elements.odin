@@ -128,13 +128,36 @@ label_simple :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags =
 	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
 }
 
-label_alpha :: proc(ctx: ^qwe.Context, text: string, alpha: f32, flags: qwe.Element_Flags = {}) {
+label_alpha :: proc(
+	ctx: ^qwe.Context,
+	text: string,
+	alpha: f32,
+	panning: f32,
+	flags: qwe.Element_Flags = {},
+) {
 	element := qwe.element_make(ctx, text, flags)
 
 	// render
 	range := ed.theme.text1
 	range.a = min(range.a * alpha, 1)
-	element_text(element.text_align, element.bounds, element.text_label, range)
+
+	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, element.text_label)
+
+	// in size
+	width := f32(element.bounds.r - element.bounds.l)
+	x: f32
+	y := text_positiony(element.text_align.y, element.bounds, text_metrics)
+	if text_metrics.ink.w < width {
+		x = text_positionx(element.text_align.y, element.bounds, text_metrics)
+	} else {
+		unit := math.sin(panning)
+		step := abs(unit) * (text_metrics.ink.w - width + 40)
+		// log.info("DRAW SPAN", panning, step)
+		x = f32(element.bounds.l) - step + 20
+	}
+
+	color_set(range)
+	oc.text_fill(x, y, element.text_label)
 }
 
 label_hover :: proc(
@@ -158,7 +181,7 @@ label_highlight :: proc(
 	text: string,
 	state: bool,
 	flags: qwe.Element_Flags = {},
-) {
+) -> ^qwe.Element {
 	element := qwe.element_make(ctx, text, flags)
 	element.highlight_state = state
 
@@ -172,6 +195,8 @@ label_highlight :: proc(
 	)
 	oc.set_color(text_color)
 	oc.text_fill(x, y, element.text_label)
+
+	return element
 }
 
 label_underlined :: proc(
@@ -288,27 +313,18 @@ vscrollbar :: proc(ctx: ^qwe.Context, name: string) {
 	}
 
 	qwe.element_set_bounds(ctx, to)
-	element := qwe.element_make(ctx, name, {})
+	element := qwe.element_make(ctx, name, {.Scroll_Ignore})
 
 	full := parent.inf.b - parent.inf.t
 	diff := qwe.scrollbar_maximum_page_diff(parent)
-	// unit := f32(parent.scroll.y) / f32(max(-diff, 1))
 
 	if diff > 0 {
-		// gradient fun
-		top := to
-		top.b = to.t + int(parent.scroll.y)
-		bottom := to
-		bottom.t = to.t + int(parent.scroll.y)
-		// alpha := f32(0.75)
+		x, y, w, h := qwe.rect_flat(element.bounds)
+		base := ed.theme.scrollbar_base
 		alpha := 0.75 * parent.hover_children
-		grad1 := oc.color_srgba(1, 1, 1, alpha)
-		grad2 := oc.color_srgba(0.5, 0.5, 0.5, alpha)
-		oc.set_gradient(.SRGB, grad2, grad2, grad1, grad1)
-		x, y, w, h := qwe.rect_flat(top)
-		oc.rectangle_fill(x, y, w, h)
-		oc.set_gradient(.SRGB, grad1, grad1, grad2, grad2)
-		x, y, w, h = qwe.rect_flat(bottom)
+		base.a = alpha
+		// base.z = min(base.z + parent.hover_children * 0.1, 1)
+		color_set(base)
 		oc.rectangle_fill(x, y, w, h)
 	}
 
@@ -372,9 +388,9 @@ task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
 	bounds := qwe.rect_margin(element.bounds, 1)
 	hue := hash_hue(element.text_label)
 	element_background(bounds, {hue, 0.65, 0.75, 1}, false)
-	if ed.task_drag == task.id {
-		element_border(bounds, ed.theme.border_highlight, ed.theme.border_width * 2, false)
-	}
+	// if ed.task_drag == task.id {
+	// 	element_border(bounds, ed.theme.border_highlight, ed.theme.border_width * 2, false)
+	// }
 	return element
 }
 
@@ -481,6 +497,38 @@ element_background_and_border :: proc(
 	element_border(bounds, border, ed.theme.border_width, rounded)
 }
 
+text_positionx :: proc(
+	align: qwe.Text_Align,
+	bounds: qwe.Rect,
+	text_metrics: oc.text_metrics,
+) -> f32 {
+	switch align {
+	case .Start:
+		return f32(bounds.l) + ed.theme.text_margin.x
+	case .Center:
+		return f32(bounds.l) - text_metrics.ink.w / 2 + f32(bounds.r - bounds.l) / 2
+	case .End:
+		return f32(bounds.r) - text_metrics.ink.w - ed.theme.text_margin.x
+	}
+	return 0
+}
+
+text_positiony :: proc(
+	align: qwe.Text_Align,
+	bounds: qwe.Rect,
+	text_metrics: oc.text_metrics,
+) -> f32 {
+	switch align {
+	case .Start:
+		return f32(bounds.t) + text_metrics.ink.h + ed.theme.text_margin.y
+	case .Center:
+		return f32(bounds.t) + text_metrics.ink.h / 2 + f32(bounds.b - bounds.t) / 2
+	case .End:
+		return f32(bounds.b) - ed.theme.text_margin.y
+	}
+	return 0
+}
+
 @(private)
 text_position :: proc(
 	align: [2]qwe.Text_Align,
@@ -489,32 +537,13 @@ text_position :: proc(
 ) -> (
 	x, y: f32,
 ) {
-	b := bounds
-
-	switch align.x {
-	case .Start:
-		x = f32(b.l) + ed.theme.text_margin.x
-	case .Center:
-		x = f32(b.l) - text_metrics.ink.w / 2 + f32(b.r - b.l) / 2
-	case .End:
-		x = f32(b.r) - text_metrics.ink.w - ed.theme.text_margin.x
-	}
-
-	switch align.y {
-	case .Start:
-		y = f32(b.t) + text_metrics.ink.h + ed.theme.text_margin.y
-	case .Center:
-		y = f32(b.t) + text_metrics.ink.h / 2 + f32(b.b - b.t) / 2
-	case .End:
-		y = f32(b.b) - ed.theme.text_margin.y
-	}
-
+	x = text_positionx(align.x, bounds, text_metrics)
+	y = text_positiony(align.y, bounds, text_metrics)
 	return
 }
 
 @(private)
 element_text :: proc(align: [2]qwe.Text_Align, bounds: qwe.Rect, render: string, color: [4]f32) {
-	theme := &ed.theme
 	text_metrics := oc.font_text_metrics(ed.font_regular, ed.font_size, render)
 	x, y := text_position(align, bounds, text_metrics)
 	color_set(color)

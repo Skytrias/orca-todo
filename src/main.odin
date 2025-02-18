@@ -6,12 +6,23 @@ import "core:strings"
 import oc "core:sys/orca"
 import "qwe"
 
+// Bugs
+// Scrollbar position gets shifted once scrolled
+// dragging better or more proper
+// 
+// how text wrapped to window
+// scroll v/h the offsets
+
+// Orca related bugs that are crappy
+// keeps crashing on file reload
+// tile overload on renderer can crash the application
+
 ed: Editor
 
 main :: proc() {
 	editor_init(&ed)
 	editor_load(&ed)
-	// editor_example(&ed)
+	editor_example(&ed)
 }
 
 @(fini)
@@ -35,6 +46,8 @@ oc_on_frame_refresh :: proc "c" () {
 
 	scratch := oc.scratch_begin()
 	defer oc.scratch_end(scratch)
+
+	free_all(context.temp_allocator)
 
 	oc.canvas_context_select(editor.canvas)
 	oc.set_color_rgba(1, 1, 1, 1)

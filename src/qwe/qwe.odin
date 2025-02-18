@@ -2,11 +2,15 @@ package qwe
 
 import "core:hash"
 import "core:log"
+import "core:mem"
 import "core:strings"
 
 // TODO scale
 
 Id :: u32
+MAX_DRAG_BYTES :: 1028
+MAX_DROP_BYTES :: 1028
+MAX_DROP_COUNT :: 32
 MAX_HOVER :: 256
 
 Mouse :: enum {
@@ -51,12 +55,16 @@ Context :: struct {
 	hover_index:            int,
 	focus_id:               Id,
 	focus_lost_id:          Id,
+
+	// dragndrop
+	dragndrop:              Drag_Drop_State,
 }
 
 Element_Flag :: enum {
 	Is_Parent,
 	Ignore_Self,
 	Ignore_Self_And_Descendants,
+	Scroll_Ignore,
 }
 
 Element_Flags :: bit_set[Element_Flag]
@@ -106,14 +114,46 @@ Text_Align :: enum {
 	End,
 }
 
+Drag_Drop_State :: struct {
+	// overlapping drop registers (name + data allocated)
+	stack:       [MAX_DROP_COUNT]Drop_Data,
+	stack_index: int,
+
+	// single callback handling (drag + drop type based)
+	call:        Drag_Drop_Call, // universal way to handle drag&drop
+	call_data:   rawptr,
+
+	// drop stored data
+	drop_arena:  mem.Arena,
+	drop_bytes:  []byte,
+
+	// drag stored data
+	drag_type:   string, // starting drag data
+	drag_bytes:  []byte,
+}
+
+Drop_Data :: struct {
+	type:      string,
+	data:      rawptr,
+	data_size: int,
+}
+
+// when this returns true, the drag&drop chain stops
+Drag_Drop_Call :: proc(state: ^Drag_Drop_State, drop: Drop_Data) -> bool
+
 init :: proc(ctx: ^Context) {
 	ctx.elements = make(map[Id]Element, 512)
 	ctx.parent_stack = make([dynamic]^Element, 0, 128)
+	ctx.dragndrop.drag_bytes = make([]byte, MAX_DRAG_BYTES)
+	ctx.dragndrop.drop_bytes = make([]byte, MAX_DROP_BYTES)
+	mem.arena_init(&ctx.dragndrop.drop_arena, ctx.dragndrop.drop_bytes)
 }
 
 destroy :: proc(ctx: ^Context) {
 	delete(ctx.elements)
 	delete(ctx.parent_stack)
+	delete(ctx.dragndrop.drag_bytes)
+	delete(ctx.dragndrop.drop_bytes)
 }
 
 begin :: proc(ctx: ^Context) {
@@ -126,6 +166,10 @@ begin :: proc(ctx: ^Context) {
 	// clear hover info
 	ctx.hover_index = 0
 	ctx.hover_stack[0] = nil
+
+	// clear dragndrop
+	ctx.dragndrop.stack_index = 0
+	free_all(mem.arena_allocator(&ctx.dragndrop.drop_arena))
 
 	element_set_bounds(ctx, {0, ctx.window_size.x, 0, ctx.window_size.y})
 	ctx.window = element_begin(ctx, "!root!", {})
@@ -163,6 +207,19 @@ end :: proc(ctx: ^Context, dt: f32) {
 	// udpate hover_children
 	for id, &element in &ctx.elements {
 		animate_unit(&element.hover_children, dt, element.hover_children_ran)
+	}
+
+	// handle drag&drop requests
+	if ctx.dragndrop.call != nil && .Left in ctx.mouse_released {
+		for i := ctx.dragndrop.stack_index - 1; i >= 0; i -= 1 {
+			drop := ctx.dragndrop.stack[i]
+
+			if ctx.dragndrop.call(&ctx.dragndrop, drop) {
+				break
+			}
+		}
+
+		ctx.dragndrop.drag_type = ""
 	}
 
 	ctx.mouse_pressed = {}
@@ -226,6 +283,13 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 	if len(ctx.parent_stack) > 0 {
 		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
 		res.parent = parent
+
+		if .Scroll_Ignore not_in flags {
+			res.bounds.t -= parent.scroll.y
+			res.bounds.b -= parent.scroll.y
+			res.bounds.l -= parent.scroll.x
+			res.bounds.r -= parent.scroll.x
+		}
 	}
 
 	ctx.spawn_index += 1
@@ -418,14 +482,6 @@ element_text_yalign :: proc(ctx: ^Context, align: Text_Align) {
 element_set_bounds :: proc(ctx: ^Context, to: Rect) {
 	ctx.next.bounds = to
 	ctx.next.cut_direction = .None
-
-	if len(ctx.parent_stack) > 0 {
-		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
-		ctx.next.bounds.t -= parent.scroll.y
-		ctx.next.bounds.b -= parent.scroll.y
-		ctx.next.bounds.l -= parent.scroll.x
-		ctx.next.bounds.r -= parent.scroll.x
-	}
 }
 
 element_set_bounds_relative :: proc(ctx: ^Context, to: Rect) {
@@ -436,14 +492,6 @@ element_set_bounds_relative :: proc(ctx: ^Context, to: Rect) {
 	ctx.next.bounds.r = ctx.next.bounds.l + (to.r - to.l)
 	ctx.next.bounds.t += to.t
 	ctx.next.bounds.b = ctx.next.bounds.t + (to.b - to.t)
-
-	if len(ctx.parent_stack) > 0 {
-		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
-		ctx.next.bounds.t -= parent.scroll.y
-		ctx.next.bounds.b -= parent.scroll.y
-		ctx.next.bounds.l -= parent.scroll.x
-		ctx.next.bounds.r -= parent.scroll.x
-	}
 }
 
 @(private)

@@ -8,10 +8,6 @@ import oc "core:sys/orca"
 import "qwe"
 import "uuid"
 
-TASK_MIN_SIZE :: 100
-TASK_GAP :: 2
-TASK_TEXT_SIZE :: 22
-
 // 	// theme overlay
 // 	if editor.show_theme {
 // 		bounds := qwe.Rect{0, int(editor.window_size.x), 0, int(editor.window_size.y)}
@@ -97,13 +93,13 @@ editor_render_tasks :: proc(editor: ^Editor) {
 	cell_hovered: bool
 	cell_index: int
 	editor.task_hovering = false
-	drag_end := !editor.task_dragging && editor.task_drag != {}
 
 	task_step_count := 4
 	task_size := int(cellx_size / task_step_count)
 
 	// tags
 	editor.write_mode = .Task
+	task_drag_started: ^Task
 	for tag, y in editor.tags {
 		tag := header_find_id(editor.tags[:], tag.id)
 		xx := int(offset.x)
@@ -111,7 +107,25 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
 		qwe.element_set_bounds(ui, to)
 		qwe.element_text_align(ui, .End, .Center)
-		label_highlight(ui, tag.description, editor.write_hover.y == tag.id)
+		tag_label := label_highlight(ui, tag.description, editor.write_hover.y == tag.id)
+		if qwe.drag_started(ui, tag_label) {
+			log.info("START")
+			editor.header_drag = {
+				index_from = y,
+				running    = true,
+				is_tag     = true,
+			}
+		}
+		if qwe.drag_ended(ui, tag_label) {
+			log.info("ENDED")
+			editor.header_drag.finished = true
+		}
+		if qwe.is_hovered(ui, tag_label) {
+			if editor.header_drag.running {
+				log.info("NEXT HOV", y)
+				editor.header_drag.index_to = y
+			}
+		}
 
 		// states
 		for state, x in editor.states {
@@ -140,15 +154,14 @@ editor_render_tasks :: proc(editor: ^Editor) {
 			if qwe.is_hovered(ui, sub) {
 				editor.write_hover = {state.id, tag.id}
 				cell_hovered = true
+			}
 
-				if drag_end {
-					task := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
-					if task != nil {
-						task.state = state.id
-						task.tag = tag.id
-						editor.task_drag = {}
-					}
+			if qwe.overlapping(ui, sub) {
+				drop := Task_Drop {
+					state = state.id,
+					tag   = tag.id,
 				}
+				qwe.drop_set(ui, "Cell", drop)
 			}
 
 			defer {
@@ -173,18 +186,20 @@ editor_render_tasks :: proc(editor: ^Editor) {
 					editor.task_hovered = task.id
 					editor.task_hovering = true
 				}
-				if qwe.dragging(ui, task_element) {
-					editor.task_drag = task.id
-					editor.task_dragging = true
-				}
-				if qwe.was_focused(ui, task_element) {
-					editor.task_dragging = false
+				if qwe.drag_started(ui, task_element) {
+					qwe.drag_set(ui, "Task", task^)
+					task_drag_started = task
+					qwe.set_focus(ui, 0)
 				}
 				task_x += 1
 			}
 
 			cell_index += 1
 		}
+	}
+
+	if task_drag_started != nil {
+		editor_task_remove(editor, task_drag_started)
 	}
 
 	// tag add section
@@ -225,29 +240,34 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		}
 	}
 
-	if drag_end {
-		if editor.task_drag != {} {
-			task := tasks_find_match_id(editor.tasks[:], editor.task_drag)
-			editor_task_remove(editor, task)
-		}
-		editor.task_drag = {}
-	}
+	// if drag_end {
+	// 	if editor.task_drag != {} {
+	// 		task := tasks_find_match_id(editor.tasks[:], editor.task_drag)
+	// 		editor_task_remove(editor, task)
+	// 	}
+	// 	editor.task_drag = {}
+	// }
 
 	if !cell_hovered {
 		editor.write_hover = {}
 	}
 
-	if editor.task_dragging {
-		task := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
-		if task != nil {
-			to := qwe.Rect {
-				ui.mouse_position.x - task_size / 2,
-				ui.mouse_position.x + task_size / 2,
-				ui.mouse_position.y - task_size / 2,
-				ui.mouse_position.y + task_size / 2,
+	if ui.dragndrop.drag_type != "" {
+		root := &ui.dragndrop.drag_bytes[0]
+
+		switch ui.dragndrop.drag_type {
+		case "Task":
+			task := cast(^Task)root
+			if task != nil {
+				to := qwe.Rect {
+					ui.mouse_position.x - task_size / 2,
+					ui.mouse_position.x + task_size / 2,
+					ui.mouse_position.y - task_size / 2,
+					ui.mouse_position.y + task_size / 2,
+				}
+				qwe.element_set_bounds(ui, to)
+				task_small_drag(ui, string(task.id[:]), "taskhover")
 			}
-			qwe.element_set_bounds(ui, to)
-			task_small_drag(ui, string(task.id[:]), "taskhover")
 		}
 	}
 
@@ -270,7 +290,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		if task != nil {
 			qwe.element_fill(ui)
 			qwe.element_text_align(ui, .Center, .Center)
-			label_alpha(ui, task.content, editor.task_hover_unit * 2, {})
+			label_alpha(ui, task.content, editor.task_hover_unit * 2, editor.task_panning)
 		}
 	}
 }

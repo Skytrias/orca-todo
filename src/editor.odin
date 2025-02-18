@@ -39,6 +39,14 @@ Write_Mode :: enum {
 	Tag,
 }
 
+Header_Drag :: struct {
+	running:    bool,
+	finished:   bool,
+	is_tag:     bool,
+	index_from: int,
+	index_to:   int,
+}
+
 Editor :: struct {
 	surface:             oc.surface,
 	renderer:            oc.canvas_renderer,
@@ -56,6 +64,7 @@ Editor :: struct {
 	write_hover:         [2]uuid.Guid,
 	write_mode:          Write_Mode,
 	camera:              Camera,
+	header_drag:         Header_Drag,
 
 	// task states
 	tasks:               [dynamic]Task,
@@ -72,11 +81,8 @@ Editor :: struct {
 	task_hovered:        uuid.Guid, // sticks around unless deleted
 	task_hovering:       bool,
 	task_hover_unit:     f32,
+	task_panning:        f32,
 	task_hover_position: [2]f32,
-
-	// task dragging
-	task_drag:           uuid.Guid,
-	task_dragging:       bool,
 
 	// random state
 	rng:                 rand.Default_Random_State,
@@ -109,11 +115,20 @@ Theme :: struct {
 	button:                 [4]f32,
 	base:                   [4]f32,
 
+	// scrollbar
+	scrollbar_base:         [4]f32,
+	scrollbar_thumb:        [4]f32,
+
 	// styling
 	border_radius:          f32,
 	border_width:           f32,
 	border_highlight_width: f32,
 	text_margin:            [2]f32,
+}
+
+Task_Drop :: struct {
+	state: uuid.Guid,
+	tag:   uuid.Guid,
 }
 
 editor_init :: proc(editor: ^Editor) {
@@ -167,6 +182,8 @@ editor_init :: proc(editor: ^Editor) {
 
 	editor.ui = new(qwe.Context)
 	qwe.init(editor.ui)
+	editor.ui.dragndrop.call = dragndrop_task
+	editor.ui.dragndrop.call_data = editor
 
 	editor_state_insert(editor, "Backlog")
 	editor_tag_insert(editor, "Start")
@@ -199,6 +216,8 @@ theme_set :: proc(editor: ^Editor, white: bool) {
 			panel2                 = {0, 0, 0.15, 1},
 			button                 = {0, 0, 0.2, 1},
 			base                   = {0, 0, 0.3, 1},
+			scrollbar_base         = {0, 0, 0.2, 1},
+			scrollbar_thumb        = {0, 0, 0.4, 1},
 			border_radius          = 5,
 			border_width           = 2,
 			border_highlight_width = 5,
@@ -236,6 +255,17 @@ editor_update_end :: proc(editor: ^Editor) {
 	hovered := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
 	if hovered == nil {
 		editor.task_hovered = {}
+	}
+
+	if editor.header_drag.finished {
+		log.info("FIN", editor.header_drag.index_from, editor.header_drag.index_to)
+		editor.header_drag = {}
+	}
+
+	if editor.task_panning <= math.PI {
+		editor.task_panning += dt / 4
+	} else {
+		editor.task_panning = 0
 	}
 }
 
@@ -325,6 +355,8 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 	editor_clear_clones(editor)
 	context.random_generator = runtime.default_random_generator(&editor.rng)
 
+	task_allocator := context.allocator
+
 	r: csv.Reader
 	r.lazy_quotes = true
 	r.reuse_record = true
@@ -362,6 +394,7 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 			continue
 		}
 
+		context.allocator = task_allocator
 		append(&editor.tasks, task_make(task, state_id, tag_id))
 	}
 }
@@ -447,8 +480,8 @@ editor_tag_insert :: proc(editor: ^Editor, description: string) -> (id: uuid.Gui
 	return
 }
 
-task_make :: proc(content: string, state, tag: uuid.Guid) -> Task {
-	return {content = strings.clone(content), state = state, tag = tag, id = uuid.gen()}
+task_make :: proc(content: string, state, tag: uuid.Guid, allocator := context.allocator) -> Task {
+	return {content = strings.clone(content, allocator), state = state, tag = tag, id = uuid.gen()}
 }
 
 editor_example :: proc(editor: ^Editor) {
@@ -471,7 +504,10 @@ editor_example :: proc(editor: ^Editor) {
 	append(&editor.tasks, task_make("Test4", backlog, plan1))
 	append(&editor.tasks, task_make("Test5", backlog, plan1))
 	append(&editor.tasks, task_make("Test6", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	append(
+		&editor.tasks,
+		task_make("Testing this really long text out just to see if it works", backlog, plan1),
+	)
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
 	append(&editor.tasks, task_make("Test7", backlog, plan1))
@@ -598,4 +634,25 @@ camera_zoom_at :: proc(editor: ^Editor, cam: ^Camera, zoom_factor: f32) {
 	// Recalculate offset to keep the zoom centered at the mouse position
 	cam.offset.x = mouse.x - mouse_world.x * cam.zoom
 	cam.offset.y = mouse.y - mouse_world.y * cam.zoom
+}
+
+dragndrop_task :: proc(state: ^qwe.Drag_Drop_State, drop: qwe.Drop_Data) -> bool {
+	editor := cast(^Editor)state.call_data
+	root := &state.drag_bytes[0]
+
+	switch state.drag_type {
+	case "Task":
+		if drop.type == "Cell" {
+			task := cast(^Task)root
+			task_drop := cast(^Task_Drop)drop.data
+			// task_make(strings.clone(task.content))
+			// task.id = 
+			task.state = task_drop.state
+			task.tag = task_drop.tag
+			append(&editor.tasks, task^)
+			return true // accept this early
+		}
+	}
+
+	return false
 }

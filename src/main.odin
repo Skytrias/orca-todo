@@ -7,10 +7,6 @@ import oc "core:sys/orca"
 import "qwe"
 
 // Bugs
-// Scrollbar position gets shifted once scrolled
-// dragging better or more proper
-// 
-// how text wrapped to window
 // scroll v/h the offsets
 
 // Orca related bugs that are crappy

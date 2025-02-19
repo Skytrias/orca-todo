@@ -19,6 +19,7 @@ import "uuid"
 
 MATERIAL_ICONS :: oc.unicode_range{0xE000, 3000}
 TASK_EMPTY :: "(empty)"
+MAX_STRING_BYTES :: mem.Kilobyte * 10
 
 Task_Hovered :: struct {
 	text:      string,
@@ -74,6 +75,10 @@ Editor :: struct {
 	task_hover_unit:     f32,
 	task_panning:        f32,
 	task_hover_position: [2]f32,
+
+	// string storage arena, can become quite fragmented, but multiple edits arent that common
+	string_backing:      []byte,
+	string_arena:        mem.Arena,
 
 	// random state
 	rng:                 rand.Default_Random_State,
@@ -169,6 +174,9 @@ editor_init :: proc(editor: ^Editor) {
 	editor.tags = make([dynamic]Header, 0, 32)
 	editor.states = make([dynamic]Header, 0, 32)
 
+	editor.string_backing = make([]byte, MAX_STRING_BYTES)
+	mem.arena_init(&editor.string_arena, editor.string_backing)
+
 	editor.logger = oc.create_odin_logger()
 	context.logger = editor.logger
 
@@ -225,6 +233,7 @@ theme_set :: proc(editor: ^Editor, white: bool) {
 }
 
 editor_destroy :: proc(editor: ^Editor) {
+	delete(editor.string_backing)
 	delete(editor.tasks)
 	delete(editor.states)
 	delete(editor.tags)
@@ -330,15 +339,7 @@ editor_save :: proc(editor: ^Editor) {
 }
 
 editor_clear_clones :: proc(editor: ^Editor) {
-	for task in editor.tasks {
-		delete(task.content)
-	}
-	for tag in editor.tags {
-		delete(tag.description)
-	}
-	for state in editor.states {
-		delete(state.description)
-	}
+	free_all(mem.arena_allocator(&editor.string_arena))
 	clear(&editor.tasks)
 	clear(&editor.tags)
 	clear(&editor.states)
@@ -347,8 +348,6 @@ editor_clear_clones :: proc(editor: ^Editor) {
 editor_load_from_string :: proc(editor: ^Editor, content: string) {
 	editor_clear_clones(editor)
 	context.random_generator = runtime.default_random_generator(&editor.rng)
-
-	task_allocator := context.allocator
 
 	r: csv.Reader
 	r.lazy_quotes = true
@@ -365,6 +364,8 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 		tag_description := records[0]
 		state_description := records[1]
 		task := records[2]
+
+		log.info("TASK", task, tag_description, state_description)
 
 		tag := header_find_description(editor.tags[:], tag_description)
 		state := header_find_description(editor.states[:], state_description)
@@ -387,8 +388,7 @@ editor_load_from_string :: proc(editor: ^Editor, content: string) {
 			continue
 		}
 
-		context.allocator = task_allocator
-		append(&editor.tasks, task_make(task, state_id, tag_id))
+		editor_task_insert(editor, task, state_id, tag_id)
 	}
 }
 
@@ -473,18 +473,38 @@ header_find_description :: proc(headers: []Header, description: string) -> ^Head
 
 editor_state_insert :: proc(editor: ^Editor, description: string) -> (id: uuid.Guid) {
 	id = uuid.gen()
-	append(&editor.states, Header{id = id, description = strings.clone(description)})
+	append(
+		&editor.states,
+		Header {
+			id = id,
+			description = strings.clone(description, mem.arena_allocator(&editor.string_arena)),
+		},
+	)
 	return
 }
 
 editor_tag_insert :: proc(editor: ^Editor, description: string) -> (id: uuid.Guid) {
 	id = uuid.gen()
-	append(&editor.tags, Header{id = id, description = strings.clone(description)})
+	append(
+		&editor.tags,
+		Header {
+			id = id,
+			description = strings.clone(description, mem.arena_allocator(&editor.string_arena)),
+		},
+	)
 	return
 }
 
-task_make :: proc(content: string, state, tag: uuid.Guid, allocator := context.allocator) -> Task {
-	return {content = strings.clone(content, allocator), state = state, tag = tag, id = uuid.gen()}
+editor_task_insert :: proc(editor: ^Editor, content: string, state, tag: uuid.Guid) {
+	append(
+		&editor.tasks,
+		Task {
+			content = strings.clone(content, mem.arena_allocator(&editor.string_arena)),
+			state = state,
+			tag = tag,
+			id = uuid.gen(),
+		},
+	)
 }
 
 editor_example :: proc(editor: ^Editor) {
@@ -501,37 +521,39 @@ editor_example :: proc(editor: ^Editor) {
 	editor_tag_insert(editor, "Plan3")
 	editor_tag_insert(editor, "Plan4")
 
-	append(&editor.tasks, task_make("Test1", backlog, plan1))
-	append(&editor.tasks, task_make("Test2", backlog, plan1))
-	append(&editor.tasks, task_make("Test3", backlog, plan1))
-	append(&editor.tasks, task_make("Test4", backlog, plan1))
-	append(&editor.tasks, task_make("Test5", backlog, plan1))
-	append(&editor.tasks, task_make("Test6", backlog, plan1))
-	append(
-		&editor.tasks,
-		task_make("Testing this really long text out just to see if it works", backlog, plan1),
+	editor_task_insert(editor, "Test1", backlog, plan1)
+	editor_task_insert(editor, "Test2", backlog, plan1)
+	editor_task_insert(editor, "Test3", backlog, plan1)
+	editor_task_insert(editor, "Test4", backlog, plan1)
+	editor_task_insert(editor, "Test5", backlog, plan1)
+	editor_task_insert(editor, "Test6", backlog, plan1)
+	editor_task_insert(
+		editor,
+		"Testing this really long text out just to see if it works",
+		backlog,
+		plan1,
 	)
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
-	append(&editor.tasks, task_make("Test7", backlog, plan1))
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
+	editor_task_insert(editor, "Test7", backlog, plan1)
 }
 
 editor_task_remove :: proc(editor: ^Editor, task: ^Task) {
@@ -620,7 +642,7 @@ editor_insert_task :: proc(editor: ^Editor) {
 		if state != nil && tag != nil {
 			state_id := editor.write_hover.x
 			tag_id := editor.write_hover.y
-			append(&editor.tasks, task_make(content, state_id, tag_id))
+			editor_task_insert(editor, content, state_id, tag_id)
 			editor_write_reset(editor)
 		}
 	}

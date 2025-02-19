@@ -8,9 +8,9 @@ import "core:strings"
 // TODO scale
 
 Id :: u32
-MAX_DRAG_BYTES :: 1028
-MAX_DROP_BYTES :: 1028
-MAX_DROP_COUNT :: 32
+MAX_DRAG_BYTES :: 1028 * 4
+MAX_DROP_BYTES :: 1028 * 4
+MAX_DROP_COUNT :: 256
 MAX_HOVER :: 256
 
 Mouse :: enum {
@@ -142,8 +142,8 @@ Drop_Data :: struct {
 Drag_Drop_Call :: proc(state: ^Drag_Drop_State, drop: Drop_Data) -> bool
 
 init :: proc(ctx: ^Context) {
-	ctx.elements = make(map[Id]Element, 512)
-	ctx.parent_stack = make([dynamic]^Element, 0, 128)
+	ctx.elements = make(map[Id]Element, 2056)
+	ctx.parent_stack = make([dynamic]^Element, 0, 256)
 	ctx.dragndrop.drag_bytes = make([]byte, MAX_DRAG_BYTES)
 	ctx.dragndrop.drop_bytes = make([]byte, MAX_DROP_BYTES)
 	mem.arena_init(&ctx.dragndrop.drop_arena, ctx.dragndrop.drop_bytes)

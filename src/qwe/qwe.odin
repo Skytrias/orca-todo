@@ -175,6 +175,11 @@ begin :: proc(ctx: ^Context) {
 	ctx.window = element_begin(ctx, "!root!", {})
 }
 
+drop_clear :: proc(ctx: ^Context) {
+	ctx.dragndrop.drag_type = ""
+	free_all(mem.arena_allocator(&ctx.dragndrop.drop_arena))
+}
+
 animate_unit :: proc(value: ^f32, dt: f32, increase: bool) {
 	add := increase ? dt : -dt
 	value^ = clamp(value^ + add, 0, 1)
@@ -219,7 +224,7 @@ end :: proc(ctx: ^Context, dt: f32) {
 			}
 		}
 
-		ctx.dragndrop.drag_type = ""
+		drop_clear(ctx)
 	}
 
 	ctx.mouse_pressed = {}
@@ -596,12 +601,4 @@ input_mouse_up :: proc(ctx: ^Context, x, y: int, button: Mouse) {
 // set the current window size
 input_window_size :: proc(ctx: ^Context, width, height: int) {
 	ctx.window_size = {width, height}
-}
-
-/////////////////////////////////////////////////////////////////////
-// helpers
-/////////////////////////////////////////////////////////////////////
-
-is_hovered :: proc(ctx: ^Context, element: ^Element) -> bool {
-	return ctx.hover_id == element.id
 }

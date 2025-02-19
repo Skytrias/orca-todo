@@ -39,14 +39,6 @@ Write_Mode :: enum {
 	Tag,
 }
 
-Header_Drag :: struct {
-	running:    bool,
-	finished:   bool,
-	is_tag:     bool,
-	index_from: int,
-	index_to:   int,
-}
-
 Editor :: struct {
 	surface:             oc.surface,
 	renderer:            oc.canvas_renderer,
@@ -64,7 +56,6 @@ Editor :: struct {
 	write_hover:         [2]uuid.Guid,
 	write_mode:          Write_Mode,
 	camera:              Camera,
-	header_drag:         Header_Drag,
 
 	// task states
 	tasks:               [dynamic]Task,
@@ -91,6 +82,9 @@ Editor :: struct {
 Header :: struct {
 	id:          uuid.Guid,
 	description: string,
+
+	// immediate data
+	bounds:      qwe.Rect,
 }
 
 Task :: struct {
@@ -126,9 +120,13 @@ Theme :: struct {
 	text_margin:            [2]f32,
 }
 
-Task_Drop :: struct {
+Cell_Drop :: struct {
 	state: uuid.Guid,
 	tag:   uuid.Guid,
+}
+
+Header_Drop :: struct {
+	index: int,
 }
 
 editor_init :: proc(editor: ^Editor) {
@@ -255,11 +253,6 @@ editor_update_end :: proc(editor: ^Editor) {
 	hovered := tasks_find_match_id(editor.tasks[:], editor.task_hovered)
 	if hovered == nil {
 		editor.task_hovered = {}
-	}
-
-	if editor.header_drag.finished {
-		log.info("FIN", editor.header_drag.index_from, editor.header_drag.index_to)
-		editor.header_drag = {}
 	}
 
 	if editor.task_panning <= math.PI {
@@ -446,6 +439,16 @@ editor_load :: proc(editor: ^Editor) {
 	oc.file_read_slice(cmp.handle, content)
 
 	editor_load_from_string(editor, string(content))
+}
+
+header_find_id_index :: proc(headers: []Header, id: uuid.Guid) -> int {
+	for header, index in headers {
+		if header.id == id {
+			return index
+		}
+	}
+
+	return -1
 }
 
 header_find_id :: proc(headers: []Header, id: uuid.Guid) -> ^Header {
@@ -640,17 +643,48 @@ dragndrop_task :: proc(state: ^qwe.Drag_Drop_State, drop: qwe.Drop_Data) -> bool
 	editor := cast(^Editor)state.call_data
 	root := &state.drag_bytes[0]
 
+	log.info("DRAG ATTEMP", state.drag_type)
+
 	switch state.drag_type {
 	case "Task":
 		if drop.type == "Cell" {
 			task := cast(^Task)root
-			task_drop := cast(^Task_Drop)drop.data
+			cell_drop := cast(^Cell_Drop)drop.data
 			// task_make(strings.clone(task.content))
 			// task.id = 
-			task.state = task_drop.state
-			task.tag = task_drop.tag
+			task.state = cell_drop.state
+			task.tag = cell_drop.tag
 			append(&editor.tasks, task^)
 			return true // accept this early
+		}
+
+	case "Header_Tag":
+		if drop.type == "Header_Tag" {
+			header := cast(^Header)root
+			header_drop := cast(^Header_Drop)drop.data
+
+			a := header_find_id_index(editor.tags[:], header.id)
+			b := header_drop.index
+
+			if a != b {
+				editor.tags[a], editor.tags[b] = editor.tags[b], editor.tags[a]
+			}
+
+			return true
+		}
+
+	case "Header_State":
+		if drop.type == "Header_State" {
+			header := cast(^Header)root
+			header_drop := cast(^Header_Drop)drop.data
+
+			a := header_find_id_index(editor.states[:], header.id)
+			b := header_drop.index
+
+			if a != b {
+				editor.states[a], editor.states[b] = editor.states[b], editor.states[a]
+			}
+			return true
 		}
 	}
 

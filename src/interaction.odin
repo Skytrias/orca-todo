@@ -108,23 +108,16 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		qwe.element_set_bounds(ui, to)
 		qwe.element_text_align(ui, .End, .Center)
 		tag_label := label_highlight(ui, tag.description, editor.write_hover.y == tag.id)
+		tag.bounds = tag_label.bounds
 		if qwe.drag_started(ui, tag_label) {
-			log.info("START")
-			editor.header_drag = {
-				index_from = y,
-				running    = true,
-				is_tag     = true,
-			}
+			qwe.drag_set(ui, "Header_Tag", tag^)
+			qwe.set_focus(ui, 0)
 		}
-		if qwe.drag_ended(ui, tag_label) {
-			log.info("ENDED")
-			editor.header_drag.finished = true
-		}
-		if qwe.is_hovered(ui, tag_label) {
-			if editor.header_drag.running {
-				log.info("NEXT HOV", y)
-				editor.header_drag.index_to = y
+		if qwe.overlapping(ui, tag_label) {
+			drop := Header_Drop {
+				index = y,
 			}
+			qwe.drop_set(ui, "Header_Tag", drop)
 		}
 
 		// states
@@ -136,7 +129,19 @@ editor_render_tasks :: proc(editor: ^Editor) {
 				to := qwe.Rect{xx, xx + cellx_size, yy, yy + celly_size}
 				qwe.element_set_bounds(ui, to)
 				qwe.element_text_align(ui, .Center, .End)
-				label_highlight(ui, state.description, editor.write_hover.x == state.id)
+				state_label := label_highlight(ui, state.description, editor.write_hover.x == state.id)
+				state.bounds = state_label.bounds
+
+				if qwe.drag_started(ui, state_label) {
+					qwe.drag_set(ui, "Header_State", state^)
+					qwe.set_focus(ui, 0)
+				}
+				if qwe.overlapping(ui, state_label) {
+					drop := Header_Drop {
+						index = x,
+					}
+					qwe.drop_set(ui, "Header_State", drop)
+				}
 			}
 
 			tasks_find_match_ids(&task_matches, editor.tasks[:], state.id, tag.id)
@@ -157,7 +162,7 @@ editor_render_tasks :: proc(editor: ^Editor) {
 			}
 
 			if qwe.overlapping(ui, sub) {
-				drop := Task_Drop {
+				drop := Cell_Drop {
 					state = state.id,
 					tag   = tag.id,
 				}
@@ -240,37 +245,35 @@ editor_render_tasks :: proc(editor: ^Editor) {
 		}
 	}
 
-	// if drag_end {
-	// 	if editor.task_drag != {} {
-	// 		task := tasks_find_match_id(editor.tasks[:], editor.task_drag)
-	// 		editor_task_remove(editor, task)
-	// 	}
-	// 	editor.task_drag = {}
-	// }
-
 	if !cell_hovered {
 		editor.write_hover = {}
 	}
 
-	if ui.dragndrop.drag_type != "" {
-		root := &ui.dragndrop.drag_bytes[0]
-
-		switch ui.dragndrop.drag_type {
-		case "Task":
-			task := cast(^Task)root
-			if task != nil {
-				to := qwe.Rect {
-					ui.mouse_position.x - task_size / 2,
-					ui.mouse_position.x + task_size / 2,
-					ui.mouse_position.y - task_size / 2,
-					ui.mouse_position.y + task_size / 2,
-				}
-				qwe.element_set_bounds(ui, to)
-				task_small_drag(ui, string(task.id[:]), "taskhover")
+	switch ui.dragndrop.drag_type {
+	case "Task":
+		task := cast(^Task)qwe.drag_root(ui)
+		if task != nil {
+			to := qwe.Rect {
+				ui.mouse_position.x - task_size / 2,
+				ui.mouse_position.x + task_size / 2,
+				ui.mouse_position.y - task_size / 2,
+				ui.mouse_position.y + task_size / 2,
 			}
+			qwe.element_set_bounds(ui, to)
+			task_small_drag(ui, string(task.id[:]), "taskhover")
+		}
+
+	case "Header_Tag", "Header_State":
+		header := cast(^Header)qwe.drag_root(ui)
+		if header != nil {
+			x, y, w, h := qwe.rect_flat(header.bounds)
+			color_set(editor.theme.border_highlight)
+			oc.set_width(editor.theme.border_highlight_width)
+			oc.rectangle_stroke(x, y, w, h)
 		}
 	}
 
+	// hover info the full text
 	if editor.task_hover_unit > 0 {
 		editor_font_size_reset(editor)
 		width := 300

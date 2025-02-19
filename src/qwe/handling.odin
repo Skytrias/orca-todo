@@ -14,6 +14,7 @@ right_clicked :: proc(ctx: ^Context, element: ^Element) -> bool {
 }
 
 dragging :: proc(ctx: ^Context, element: ^Element) -> bool {
+	// TODO add mouse diff
 	return ctx.mouse_down == {.Left} && ctx.focus_id == element.id
 }
 
@@ -103,4 +104,12 @@ slider_interaction :: proc(
 	v = clamp(v, low, high)
 	value^ = v
 	return previous != v
+}
+
+is_hovered :: proc(ctx: ^Context, element: ^Element) -> bool {
+	return ctx.hover_id == element.id
+}
+
+drag_root :: #force_inline proc(ctx: ^Context) -> rawptr {
+	return &ctx.dragndrop.drag_bytes[0]
 }

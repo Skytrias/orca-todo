@@ -23,7 +23,8 @@ Mouse_Buttons :: bit_set[Mouse]
 
 Context :: struct {
 	// element storage
-	elements:               map[Id]Element,
+	elements:               [dynamic]Element,
+	persistance:            map[Id]Element_Persistent,
 
 	// stacks
 	window:                 ^Element,
@@ -91,21 +92,29 @@ Element :: struct {
 	cut_gap:            int,
 	cut_margin:         int,
 
-	// frame info
-	frame_active:       int,
-
-	// animation
-	hover_children:     f32,
+	// temp
 	hover_children_ran: bool,
-	hover:              f32,
-	focus:              f32,
-
-	// animation manual
-	highlight:          f32,
 	highlight_state:    bool,
 
+	// persistent state fetched
+	persistent:         ^Element_Persistent,
+}
+
+// could just store this on the element but had issues when element hashes would collide
+Element_Persistent :: struct {
+	// frame info
+	frame_active:   int,
+
+	// animation
+	hover_children: f32,
+	hover:          f32,
+	focus:          f32,
+
+	// animation manual
+	highlight:      f32,
+
 	// scroll
-	scroll:             [2]int,
+	scroll:         [2]int,
 }
 
 Text_Align :: enum {
@@ -142,7 +151,8 @@ Drop_Data :: struct {
 Drag_Drop_Call :: proc(state: ^Drag_Drop_State, drop: Drop_Data) -> bool
 
 init :: proc(ctx: ^Context) {
-	ctx.elements = make(map[Id]Element, 10)
+	ctx.elements = make([dynamic]Element, 0, 10)
+	ctx.persistance = make(map[Id]Element_Persistent, 10)
 	ctx.parent_stack = make([dynamic]^Element, 0, 256)
 	ctx.dragndrop.drag_bytes = make([]byte, MAX_DRAG_BYTES)
 	ctx.dragndrop.drop_bytes = make([]byte, MAX_DROP_BYTES)
@@ -163,6 +173,7 @@ begin :: proc(ctx: ^Context) {
 	ctx.frame_count += 1
 	ctx.spawn_index += 1
 	clear(&ctx.parent_stack)
+	clear(&ctx.elements)
 
 	ctx.mouse_delta = ctx.mouse_position - ctx.mouse_last_position
 
@@ -194,15 +205,15 @@ end :: proc(ctx: ^Context, dt: f32) {
 
 	element_end(ctx)
 
-	for id, &element in &ctx.elements {
+	for &element in &ctx.elements {
 		element.hover_children_ran = false
 	}
 
 	// update animations in elements themselves
-	for id, &element in &ctx.elements {
-		animate_unit(&element.hover, dt, element.id == ctx.hover_id)
-		animate_unit(&element.focus, dt, element.id == ctx.focus_id)
-		animate_unit(&element.highlight, dt, element.highlight_state)
+	for &element in &ctx.elements {
+		animate_unit(&element.persistent.hover, dt, element.id == ctx.hover_id)
+		animate_unit(&element.persistent.focus, dt, element.id == ctx.focus_id)
+		animate_unit(&element.persistent.highlight, dt, element.highlight_state)
 
 		if element.id == ctx.focus_id {
 			element.parent.hover_children_ran = true
@@ -216,8 +227,8 @@ end :: proc(ctx: ^Context, dt: f32) {
 	}
 
 	// udpate hover_children
-	for id, &element in &ctx.elements {
-		animate_unit(&element.hover_children, dt, element.hover_children_ran)
+	for &element in &ctx.elements {
+		animate_unit(&element.persistent.hover_children, dt, element.hover_children_ran)
 	}
 
 	// handle drag&drop requests
@@ -261,8 +272,8 @@ id_get_bytes :: proc(ctx: ^Context, bytes: []byte) -> Id {
 
 element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Element {
 	log.info("ELEMENT GET START")
-	// get the id
 	left, match, right := strings.partition(text, "##")
+	// get the id
 	if right == "" {
 		right = left
 	}
@@ -270,33 +281,38 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 	log.info("CHECK ID", id)
 
 	// create the element if it doesnt exist
-	if id not_in ctx.elements {
+	if id not_in ctx.persistance {
 		log.info("INS", id, len(ctx.elements), cap(ctx.elements))
-		ctx.elements[id] = {
-			id = id,
-		}
+		ctx.persistance[id] = {}
 		log.info("INS DONE")
 	}
+	persistent := &ctx.persistance[id]
 
 	// set defaults
-	res := &ctx.elements[id]
-	if res.frame_active == ctx.frame_count {
-		log.info("ID was already activated this time-----------------------------------", id, text)
-	}
-	res.text_label = left
-	res.text_hash = right
-	res.frame_active = ctx.frame_count
-	res.cut_direction = ctx.next.cut_direction
-	res.cut_amount = ctx.next.cut_amount
-	res.cut_percentage = ctx.next.cut_percentage
-	res.cut_gap = ctx.next.cut_gap
-	res.cut_margin = ctx.next.cut_margin
-	res.text_align = ctx.next.text_align
-	res.flags = flags
-	res.bounds = ctx.next.bounds
-	res.clipped = ctx.next.bounds
-	res.inf = RECT_INF
-	res.parent = nil
+	append(
+		&ctx.elements,
+		Element {
+			id = id,
+			text_label = left,
+			text_hash = right,
+			cut_direction = ctx.next.cut_direction,
+			cut_amount = ctx.next.cut_amount,
+			cut_percentage = ctx.next.cut_percentage,
+			cut_gap = ctx.next.cut_gap,
+			cut_margin = ctx.next.cut_margin,
+			text_align = ctx.next.text_align,
+			flags = flags,
+			bounds = ctx.next.bounds,
+			clipped = ctx.next.bounds,
+			inf = RECT_INF,
+			parent = nil,
+		},
+	)
+	res := &ctx.elements[len(ctx.elements) - 1]
+	persistent.frame_active = ctx.frame_count
+	// if res.persistent.frame_active == ctx.frame_count {
+	// log.info("ID was already activated this time-----------------------------------", id, text)
+	// }
 
 	// get last parent
 	if len(ctx.parent_stack) > 0 {
@@ -307,10 +323,10 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 		res.parent = parent
 
 		if .Scroll_Ignore not_in flags {
-			res.bounds.t -= parent.scroll.y
-			res.bounds.b -= parent.scroll.y
-			res.bounds.l -= parent.scroll.x
-			res.bounds.r -= parent.scroll.x
+			res.bounds.t -= parent.persistent.scroll.y
+			res.bounds.b -= parent.persistent.scroll.y
+			res.bounds.l -= parent.persistent.scroll.x
+			res.bounds.r -= parent.persistent.scroll.x
 		}
 	}
 
@@ -596,8 +612,8 @@ element_cut_typed :: proc(ctx: ^Context, element: ^Element) {
 		element.layout = rect_margin(element.bounds, element.cut_margin)
 		element.layout_start = element.layout
 		element.clipped = rect_intersection(parent.layout_start, element.layout_start)
-		element.layout.t -= element.scroll.y
-		element.layout.b -= element.scroll.y
+		element.layout.t -= element.persistent.scroll.y
+		element.layout.b -= element.persistent.scroll.y
 	}
 
 	return

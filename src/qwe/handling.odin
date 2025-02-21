@@ -72,16 +72,16 @@ scrollbar_maximum_page_diff :: proc(element: ^Element) -> int {
 
 scrollbar_interaction :: proc(ctx: ^Context, parent, element: ^Element) {
 	if ctx.focus_id == element.id && ctx.mouse_down == {.Left} {
-		parent.scroll.y += ctx.mouse_delta.y
+		parent.persistent.scroll.y += ctx.mouse_delta.y
 	}
 
 	if mouse_over(ctx, parent.bounds) {
-		parent.scroll.y += ctx.scroll_delta.y
+		parent.persistent.scroll.y += ctx.scroll_delta.y
 	}
 
 	diff := scrollbar_maximum_page_diff(parent)
-	orig := parent.scroll.y
-	parent.scroll.y = clamp(parent.scroll.y, 0, max(diff, 0))
+	orig := parent.persistent.scroll.y
+	parent.persistent.scroll.y = clamp(parent.persistent.scroll.y, 0, max(diff, 0))
 }
 
 slider_interaction :: proc(

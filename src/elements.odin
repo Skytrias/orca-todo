@@ -168,7 +168,7 @@ label_hover :: proc(
 	element := qwe.element_make(ctx, text, flags)
 
 	range := ed.theme.button
-	range.a *= element.hover
+	range.a *= element.persistent.hover
 	element_background(element.bounds, range, false)
 
 	// render
@@ -194,7 +194,7 @@ label_highlight :: proc(
 	text_color := color_blend(
 		color_get(ed.theme.text1),
 		color_get(ed.theme.border_highlight),
-		element.highlight,
+		element.persistent.highlight,
 	)
 	oc.set_color(text_color)
 	oc.text_fill(x, y, element.text_label)
@@ -234,7 +234,7 @@ button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags = {}) -
 
 	// render with my customized render calls
 	color := ed.theme.button
-	color.z = min(color.z + element.hover * 0.1, 1)
+	color.z = min(color.z + element.persistent.hover * 0.1, 1)
 	element_background_and_border(element.bounds, color, ed.theme.border, true)
 	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text1)
 
@@ -257,7 +257,7 @@ slider :: proc(
 
 	// render
 	color := ed.theme.base
-	color.z = min(color.z + element.hover * 0.1, 1)
+	color.z = min(color.z + element.persistent.hover * 0.1, 1)
 	element_background_and_border(element.bounds, color, ed.theme.border, true)
 	text := fmt.tprintf(format, value^)
 	element_text(element.text_align, element.bounds, text, ed.theme.text1)
@@ -273,7 +273,7 @@ slider :: proc(
 	thumb = qwe.rect_margin(thumb, 5)
 
 	color = ed.theme.button
-	color.z = min(color.z + element.hover * 0.1, 1)
+	color.z = min(color.z + element.persistent.hover * 0.1, 1)
 	element_background_and_border(thumb, color, ed.theme.border, true)
 }
 
@@ -324,7 +324,7 @@ vscrollbar :: proc(ctx: ^qwe.Context, name: string) {
 	if diff > 0 {
 		x, y, w, h := qwe.rect_flat(element.bounds)
 		base := ed.theme.scrollbar_base
-		alpha := 0.75 * parent.hover_children
+		alpha := 0.75 * parent.persistent.hover_children
 		base.a = alpha
 		// base.z = min(base.z + parent.hover_children * 0.1, 1)
 		color_set(base)
@@ -350,8 +350,8 @@ task_panel_begin :: proc(ctx: ^qwe.Context, text_hash: string) -> ^qwe.Element {
 
 border_width_animate :: proc(element: ^qwe.Element) -> f32 {
 	return max(
-		ed.theme.border_width * (1 - element.hover_children),
-		ed.theme.border_highlight_width * (element.hover_children),
+		ed.theme.border_width * (1 - element.persistent.hover_children),
+		ed.theme.border_highlight_width * (element.persistent.hover_children),
 	)
 }
 
@@ -359,7 +359,7 @@ task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 	element := ctx.parent_stack[len(ctx.parent_stack) - 1]
 	range := ed.theme.border_highlight
 	range.a = 0.75
-	range.a *= element.hover_children
+	range.a *= element.persistent.hover_children
 	border_width := border_width_animate(element)
 	element_border(element.bounds, range, border_width, false)
 
@@ -377,7 +377,7 @@ task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 	text_color := color_blend(
 		color_get(ed.theme.text2),
 		color_get(ed.theme.border_highlight),
-		element.hover_children,
+		element.persistent.hover_children,
 	)
 	oc.set_color(text_color)
 	oc.text_fill(x, y, render)
@@ -422,11 +422,11 @@ hover_button :: proc(ctx: ^qwe.Context, text: string, flags: qwe.Element_Flags =
 
 	// render with my customized render calls
 	color := ed.theme.panel2
-	color.z = min(color.z + element.hover * 0.1, 1)
-	color.a *= element.hover
+	color.z = min(color.z + element.persistent.hover * 0.1, 1)
+	color.a *= element.persistent.hover
 	element_background(element.bounds, color, false)
 	text_color := ed.theme.text1
-	text_color.a *= element.hover
+	text_color.a *= element.persistent.hover
 	element_text(element.text_align, element.bounds, element.text_label, text_color)
 
 	// interaction
@@ -437,7 +437,7 @@ label_hover_range :: proc(ctx: ^qwe.Context, text: string) -> ^qwe.Element {
 	element := qwe.element_make(ctx, text, {})
 	range := ed.theme.border_highlight
 	range.a = 0.75
-	range.a *= element.hover_children
+	range.a *= element.persistent.hover_children
 	border_width := border_width_animate(element)
 	element_border(element.bounds, range, border_width, false)
 	element_text(element.text_align, element.bounds, element.text_label, ed.theme.text2)

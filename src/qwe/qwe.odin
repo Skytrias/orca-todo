@@ -142,7 +142,7 @@ Drop_Data :: struct {
 Drag_Drop_Call :: proc(state: ^Drag_Drop_State, drop: Drop_Data) -> bool
 
 init :: proc(ctx: ^Context) {
-	ctx.elements = make(map[Id]Element, 2056)
+	ctx.elements = make(map[Id]Element, 10)
 	ctx.parent_stack = make([dynamic]^Element, 0, 256)
 	ctx.dragndrop.drag_bytes = make([]byte, MAX_DRAG_BYTES)
 	ctx.dragndrop.drop_bytes = make([]byte, MAX_DROP_BYTES)
@@ -157,6 +157,9 @@ destroy :: proc(ctx: ^Context) {
 }
 
 begin :: proc(ctx: ^Context) {
+	log.info("BEGIN BEGIN")
+	defer log.info("BEGIN END")
+
 	ctx.frame_count += 1
 	ctx.spawn_index += 1
 	clear(&ctx.parent_stack)
@@ -186,6 +189,9 @@ animate_unit :: proc(value: ^f32, dt: f32, increase: bool) {
 }
 
 end :: proc(ctx: ^Context, dt: f32) {
+	log.info("END BEGIN")
+	defer log.info("END END")
+
 	element_end(ctx)
 
 	for id, &element in &ctx.elements {
@@ -254,22 +260,29 @@ id_get_bytes :: proc(ctx: ^Context, bytes: []byte) -> Id {
 }
 
 element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Element {
+	log.info("ELEMENT GET START")
 	// get the id
 	left, match, right := strings.partition(text, "##")
 	if right == "" {
 		right = left
 	}
 	id := id_get_bytes(ctx, transmute([]byte)right)
+	log.info("CHECK ID", id)
 
 	// create the element if it doesnt exist
 	if id not_in ctx.elements {
+		log.info("INS", id, len(ctx.elements), cap(ctx.elements))
 		ctx.elements[id] = {
 			id = id,
 		}
+		log.info("INS DONE")
 	}
 
 	// set defaults
 	res := &ctx.elements[id]
+	if res.frame_active == ctx.frame_count {
+		log.info("ID was already activated this time-----------------------------------", id, text)
+	}
 	res.text_label = left
 	res.text_hash = right
 	res.frame_active = ctx.frame_count
@@ -283,10 +296,14 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 	res.bounds = ctx.next.bounds
 	res.clipped = ctx.next.bounds
 	res.inf = RECT_INF
+	res.parent = nil
 
 	// get last parent
 	if len(ctx.parent_stack) > 0 {
 		parent := ctx.parent_stack[len(ctx.parent_stack) - 1]
+		if res == parent {
+			log.info("THSI SISSSS BAD--------------------------++++++++++++++++")
+		}
 		res.parent = parent
 
 		if .Scroll_Ignore not_in flags {
@@ -297,21 +314,27 @@ element_get :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Eleme
 		}
 	}
 
+	log.info("MODIFY DONE")
+
 	ctx.spawn_index += 1
 	return res
 }
 
 element_make :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Element {
+	log.info("ELM MAKE")
 	element := element_get(ctx, text, flags)
+	log.info("ELM CUT")
 	element_cut_typed(ctx, element)
+	log.info("ELM UPDATE")
 	element_update_control(ctx, element)
+	log.info("ELM UPDATE DONE")
 	return element
 }
 
 element_begin :: proc(ctx: ^Context, text: string, flags: Element_Flags) -> ^Element {
 	element := element_get(ctx, text, flags + {.Is_Parent})
 	element_cut_typed(ctx, element)
-	element_update_control(ctx, element)
+	// element_update_control(ctx, element)
 	append(&ctx.parent_stack, element)
 	return element
 }
@@ -382,12 +405,19 @@ set_focus :: proc(ctx: ^Context, id: Id) {
 @(private)
 element_should_be_ignored :: proc(element: ^Element) -> bool {
 	p := element
+	LIMIT :: 100
+	check_index := 0
 
 	for p != nil {
 		if .Ignore_Self_And_Descendants in p.flags {
 			return true
 		}
 		p = p.parent
+
+		if check_index > 50 {
+			// log.info("LIMIT", check_index)
+		}
+		check_index += 1
 	}
 
 	return .Ignore_Self in p.flags
@@ -396,6 +426,9 @@ element_should_be_ignored :: proc(element: ^Element) -> bool {
 // TODO tackle keeping hover == focus when held down
 // updates the control element wether it should be hovered/focused
 element_update_control :: proc(ctx: ^Context, element: ^Element) {
+	log.info("UPD START")
+	defer log.info("UPD END")
+
 	if element_should_be_ignored(element) {
 		return
 	}

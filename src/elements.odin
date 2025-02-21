@@ -182,6 +182,9 @@ label_highlight :: proc(
 	state: bool,
 	flags: qwe.Element_Flags = {},
 ) -> ^qwe.Element {
+	log.info("LABEL HIGHLIGHT")
+	defer log.info("LABEL HIGHLIGHT END")
+
 	element := qwe.element_make(ctx, text, flags)
 	element.highlight_state = state
 
@@ -383,11 +386,14 @@ task_panel_end :: proc(ctx: ^qwe.Context, text_display: string) {
 }
 
 task_small :: proc(ctx: ^qwe.Context, task: ^Task) -> ^qwe.Element {
+	log.info("TASK SMALL MAKE")
+	defer log.info("TASK SMALL RET")
 	element := qwe.element_make(ctx, string(task.id[:]), {})
+	defer log.info("TASK SMALL DONE")
 
-	bounds := qwe.rect_margin(element.bounds, 1)
-	hue := hash_hue(element.text_label)
-	element_background(bounds, {hue, 0.65, 0.75, 1}, false)
+	// bounds := qwe.rect_margin(element.bounds, 1)
+	// hue := hash_hue(element.text_label)
+	// element_background(bounds, {hue, 0.65, 0.75, 1}, false)
 	// if ed.task_drag == task.id {
 	// 	element_border(bounds, ed.theme.border_highlight, ed.theme.border_width * 2, false)
 	// }

@@ -1,6 +1,7 @@
 package src
 
 import "base:runtime"
+import "core:hash"
 import "core:log"
 import "core:strings"
 import oc "core:sys/orca"
@@ -15,10 +16,38 @@ import "qwe"
 
 ed: Editor
 
+Testing :: struct {
+	temp: map[qwe.Id]qwe.Element,
+}
+
 main :: proc() {
 	editor_init(&ed)
 	editor_load(&ed)
 	editor_example(&ed)
+
+	context.logger = oc.create_odin_logger()
+
+	// // other := Testing{}
+	// other := new(Testing)
+	// other.temp = make(map[qwe.Id]qwe.Element, 17)
+
+	// // for i in 0 ..< 50 {
+	// // 	temp[qwe.Id(i)] = {}
+	// // }
+
+	// b: [1]u8
+	// for i in 0 ..< 10 {
+	// 	b[0] = u8(i)
+	// 	h := hash.fnv32(b[:])
+	// 	log.info("INS", h, len(other.temp), cap(other.temp))
+
+	// 	if h not_in other.temp {
+	// 		other.temp[h] = {}
+	// 	}
+
+	// 	ptr := &other.temp[h]
+	// 	ptr.text_label = "Hello"
+	// }
 }
 
 @(fini)
@@ -57,22 +86,6 @@ oc_on_frame_refresh :: proc "c" () {
 	oc.canvas_present(editor.renderer, editor.surface)
 }
 
-oc_open_cmp :: proc(
-	path: string,
-	rights: oc.file_access,
-	flags: oc.file_open_flags,
-) -> (
-	cmp: oc.io_cmp,
-) {
-	req := oc.io_req {
-		op     = .OPEN_AT,
-		open   = {rights, flags},
-		buffer = raw_data(path),
-		size   = u64(len(path)),
-	}
-
-	return oc.io_wait_single_req(&req)
-}
 
 @(export)
 oc_on_mouse_move :: proc "c" (x, y, dx, dy: f32) {
@@ -193,5 +206,4 @@ oc_on_raw_event :: proc "c" (event: ^oc.event) {
 			}
 		}
 	}
-
 }
